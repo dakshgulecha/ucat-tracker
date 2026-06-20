@@ -1,14 +1,21 @@
 /* =========================================================================
    UCAT SCORE TRACKER — app.js
    All data lives in localStorage. Nothing is sent anywhere.
+
+   SCORING MODEL (important):
+   - QR, DM, VR are each scaled 300–900. Your "cognitive total" is the SUM
+     of these three, out of 2700. This is the number UCAT Consortium uses.
+   - SJT is NOT scaled 300–900 and is NEVER added into that total. It is
+     reported only as a Band (1 = best, 4 = lowest), derived from raw marks.
    ========================================================================= */
 
 (function () {
   "use strict";
 
   /* ----------------------------- CONSTANTS ----------------------------- */
-  const STORAGE_KEY = "ucatTrackerData_v1";
+  const STORAGE_KEY = "ucatTrackerData_v2";
   const SECTIONS = ["QR", "DM", "VR", "SJT"];
+  const COGNITIVE_SECTIONS = ["QR", "DM", "VR"]; // the three that sum to the 2700 total
   const SECTION_NAMES = {
     QR: "Quantitative Reasoning",
     DM: "Decision Making",
@@ -16,16 +23,16 @@
     SJT: "Situational Judgement",
   };
   const SECTION_COLORS = {
-    QR: "#2563EB",
-    DM: "#7C3AED",
-    VR: "#0D9488",
-    SJT: "#D97706",
+    QR: "#DB7F8E",  // Old Rose
+    DM: "#604D53",  // Taupe Grey
+    VR: "#7C8284",  // Cool Steel (deepened)
+    SJT: "#A85D68", // Terracotta — deliberately distinct: different scoring system
   };
   const SECTION_SOFT = {
-    QR: "#DCE6FD",
-    DM: "#EAE0FC",
-    VR: "#D6F1EC",
-    SJT: "#FBE7C9",
+    QR: "#F8DEE2",
+    DM: "#E3D9DB",
+    VR: "#E4E7E7",
+    SJT: "#EFD9DC",
   };
   const MOCK_CATEGORIES = [
     "Full Mock",
@@ -46,23 +53,71 @@
     SJT: { maxRaw: 69, time: 26 },
   };
 
+  // Per-mock-type behaviour: drives whether "log all four at once" auto-enables,
+  // and whether raw/max defaults assume the standard structure or are left for
+  // the person to fill in (mini-mocks vary a lot in length by platform).
+  const MOCK_PROFILES = {
+    "Full Mock": { forceMulti: true, timed: true, note: "Standard full sitting — all four sections back-to-back at standard UCAT timing." },
+    "Medify Mock": { forceMulti: true, timed: true, note: "Medify full mock — standard section structure, using Medify's own scaling curve." },
+    "UCAT Official Mock": { forceMulti: true, timed: true, note: "Official UCAT mock — the closest available conditions and scaling to the real exam." },
+    "Mini-Mock": { forceMulti: false, timed: true, customCounts: true, note: "Mini‑mocks vary in length by platform — raw/max default to blank so you can match your set's actual size." },
+    "Timed Practice": { forceMulti: false, timed: true, note: "Single-section practice under standard UCAT timing." },
+    "Untimed Practice": { forceMulti: false, timed: false, note: "Untimed practice — useful for isolating accuracy from speed." },
+  };
+
+  // SJT band thresholds — approximate, based on raw marks out of 69 (scaled
+  // proportionally for non-standard set sizes, e.g. mini-mocks).
+  const SJT_BAND_INFO = {
+    1: { rangeLabel: "~57 – 69", label: "Excellent", desc: "Your judgment closely matches a panel of experts." },
+    2: { rangeLabel: "~45 – 56", label: "Good", desc: "Solid performance, with many answers matching model guidelines." },
+    3: { rangeLabel: "~35 – 44", label: "Modest", desc: "Appropriate judgment on some questions, but differs on others." },
+    4: { rangeLabel: "< 35", label: "Low", desc: "Substantial differences compared to ideal responses." },
+  };
+
+  function computeSjtBand(raw, maxRaw) {
+    if (raw === null || raw === undefined || raw === "" || isNaN(raw)) return null;
+    const ref = 69;
+    const norm = maxRaw ? raw * (ref / maxRaw) : raw;
+    if (norm >= 57) return 1;
+    if (norm >= 45) return 2;
+    if (norm >= 35) return 3;
+    return 4;
+  }
+  function sjtBandShort(band) { return band ? "Band " + band + " · " + SJT_BAND_INFO[band].label : "No data yet"; }
+  function sjtBandLabel(band) { return band ? "Band " + band : "—"; }
+
   /* ------------------------------ STORAGE ------------------------------ */
   function defaultData() {
     return {
       entries: [],
-      targets: { QR: 700, DM: 700, VR: 700, SJT: 700 },
-      settings: { lastSource: "" },
+      targets: { QR: 700, DM: 700, VR: 700, SJT: 2 }, // SJT target is a Band (1 best – 4 lowest)
+      settings: { lastSource: "", lastCategory: "Full Mock" },
     };
   }
 
   function load() {
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
-      if (!raw) return defaultData();
-      const parsed = JSON.parse(raw);
+      let parsed;
+      if (!raw) {
+        // try migrating from the old v1 key, fixing up SJT entries on the way in
+        const oldRaw = localStorage.getItem("ucatTrackerData_v1");
+        parsed = oldRaw ? JSON.parse(oldRaw) : defaultData();
+      } else {
+        parsed = JSON.parse(raw);
+      }
       if (!parsed.entries) parsed.entries = [];
       if (!parsed.targets) parsed.targets = defaultData().targets;
+      if (parsed.targets.SJT === undefined || parsed.targets.SJT > 4) parsed.targets.SJT = 2; // migrate old 300-900 SJT target
       if (!parsed.settings) parsed.settings = defaultData().settings;
+      if (parsed.settings.lastCategory === undefined) parsed.settings.lastCategory = "Full Mock";
+      // Fix up any legacy SJT entries: no scaled score, band derived from raw if missing.
+      parsed.entries.forEach((e) => {
+        if (e.section === "SJT") {
+          if (e.band === null || e.band === undefined) e.band = computeSjtBand(e.raw, e.maxRaw);
+          e.scaled = null;
+        }
+      });
       return parsed;
     } catch (e) {
       console.error("Failed to load data, starting fresh.", e);
@@ -99,6 +154,14 @@
     const m = mean(arr);
     const variance = arr.reduce((a, b) => a + (b - m) ** 2, 0) / (arr.length - 1);
     return Math.sqrt(variance);
+  }
+  function mode(arr) {
+    if (!arr.length) return null;
+    const counts = {};
+    arr.forEach((v) => (counts[v] = (counts[v] || 0) + 1));
+    let best = null, bestCount = -1;
+    Object.keys(counts).forEach((k) => { if (counts[k] > bestCount) { bestCount = counts[k]; best = parseInt(k, 10); } });
+    return best;
   }
   function linregSlope(values) {
     const n = values.length;
@@ -143,6 +206,12 @@
     return clamp(round10(300 + pct * 600), 300, 900);
   }
 
+  /* ----------------------------- RESULT DISPLAY -------------------------- */
+  function resultShort(e) {
+    if (e.section === "SJT") return e.band ? "Band " + e.band : "—";
+    return e.scaled !== null && e.scaled !== undefined ? e.scaled : "—";
+  }
+
   /* ------------------------------ DERIVED DATA --------------------------- */
   function allEntriesSorted() {
     return [...DB.entries].sort((a, b) => a.date.localeCompare(b.date) || a.createdAt - b.createdAt);
@@ -165,7 +234,8 @@
     return filterEntries(Object.assign({}, opts, { section }));
   }
 
-  // Group entries sharing a sittingId into a single "mock sitting" row
+  // Group entries sharing a sittingId into a single "mock sitting" row.
+  // SJT is tracked separately on the sitting (band/raw) — never folded into `sections`.
   function getSittings() {
     const map = {};
     allEntriesSorted().forEach((e) => {
@@ -179,11 +249,22 @@
           category: e.category,
           source: e.source,
           sections: {},
+          sjtBand: null,
+          sjtRaw: null,
         };
       }
-      map[key].sections[e.section] = e.scaled;
+      if (e.section === "SJT") {
+        map[key].sjtBand = e.band;
+        map[key].sjtRaw = e.raw;
+      } else {
+        map[key].sections[e.section] = e.scaled;
+      }
     });
     return Object.values(map).sort((a, b) => a.date.localeCompare(b.date));
+  }
+
+  function cognitiveTotal(sectionsObj) {
+    return COGNITIVE_SECTIONS.reduce((sum, sec) => sum + (sectionsObj[sec] || 0), 0);
   }
 
   function latestEntryFor(section) {
@@ -197,7 +278,7 @@
   }
 
   function sectionAverage(section) {
-    const arr = bySection(section).map((e) => e.scaled);
+    const arr = bySection(section).map((e) => e.scaled).filter((v) => v !== null && v !== undefined);
     return mean(arr);
   }
 
@@ -213,8 +294,8 @@
 
   const baseFont = { family: "Inter, sans-serif", size: 11 };
   Chart.defaults.font = baseFont;
-  Chart.defaults.color = "#4B5563";
-  Chart.defaults.borderColor = "#E1E3D6";
+  Chart.defaults.color = "#7C6A6F";
+  Chart.defaults.borderColor = "#D5C5C8";
 
   function emptyState(canvas) {
     if (!canvas) return;
@@ -223,7 +304,7 @@
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     ctx.save();
     ctx.font = "13px Inter, sans-serif";
-    ctx.fillStyle = "#9AA3B2";
+    ctx.fillStyle = "#A6898E";
     ctx.textAlign = "center";
     ctx.fillText("No data logged yet", canvas.width / 2, canvas.height / 2);
     ctx.restore();
@@ -244,6 +325,11 @@
       node.querySelector(".chart-trend").id = "chart-" + sec + "-trend";
       node.querySelector(".chart-dist").id = "chart-" + sec + "-dist";
       node.querySelector(".chart-recent").id = "chart-" + sec + "-recent";
+      if (sec === "SJT") {
+        node.querySelector(".card-head h3").textContent = "Raw mark trend over time";
+        node.querySelectorAll(".card-sub")[0].textContent = "raw marks (out of 69) with rolling average — banded, not scaled";
+        node.querySelectorAll(".card-head h3")[1].textContent = "Band distribution";
+      }
       document.querySelector(".main").appendChild(node);
       pages[sec] = node;
     });
@@ -280,28 +366,42 @@
   /* =========================================================================
      DIAL / SCORECARD SVG
      ========================================================================= */
-  function dialSVG(value, color) {
-    const pct = value ? clamp((value - 300) / 600, 0, 1) : 0;
+  function dialSVG(value, color, min, max) {
+    min = min === undefined ? 300 : min;
+    max = max === undefined ? 900 : max;
+    const pct = value ? clamp((value - min) / (max - min), 0, 1) : 0;
     const arcLen = 150.8; // approx semicircle length for r=48
     const dash = (pct * arcLen).toFixed(1);
     return (
       '<svg class="dial-arc" viewBox="0 0 108 60">' +
-      '<path d="M10,56 A48,48 0 0 1 98,56" fill="none" stroke="rgba(255,255,255,0.14)" stroke-width="9" stroke-linecap="round"/>' +
+      '<path d="M10,56 A48,48 0 0 1 98,56" fill="none" stroke="rgba(255,255,255,0.16)" stroke-width="9" stroke-linecap="round"/>' +
       '<path d="M10,56 A48,48 0 0 1 98,56" fill="none" stroke="' + color + '" stroke-width="9" stroke-linecap="round" ' +
       'stroke-dasharray="' + dash + ' ' + arcLen + '"/>' +
       "</svg>"
     );
   }
 
+  function bandBadgeHTML(band) {
+    const filled = band ? 5 - band : 0;
+    let tiers = "";
+    for (let i = 1; i <= 4; i++) tiers += '<div class="band-tier' + (i <= filled ? " filled" : "") + '"></div>';
+    const pillClass = band ? "b" + band : "bnone";
+    return (
+      '<div class="band-badge"><div class="band-tiers">' + tiers + "</div>" +
+      '<span class="band-pill ' + pillClass + '">' + sjtBandShort(band) + "</span></div>"
+    );
+  }
+
   function renderScorecard() {
     const wrap = document.getElementById("scorecard");
     wrap.innerHTML = "";
-    let total = 0, anyData = false;
-    SECTIONS.forEach((sec) => {
+    let total = 0, anyCognitive = false;
+
+    COGNITIVE_SECTIONS.forEach((sec) => {
       const latest = latestEntryFor(sec);
       const prev = previousEntryFor(sec);
       const val = latest ? latest.scaled : null;
-      if (val) { total += val; anyData = true; }
+      if (val) { total += val; anyCognitive = true; }
       let deltaHTML = '<div class="dial-delta delta-flat">No data yet</div>';
       if (latest && prev) {
         const d = latest.scaled - prev.scaled;
@@ -311,22 +411,41 @@
       } else if (latest) {
         deltaHTML = '<div class="dial-delta delta-flat">First attempt logged</div>';
       }
-      const bandHTML = sec === "SJT" && latest && latest.band ? '<div class="dial-total">Band ' + latest.band + "</div>" : "";
       wrap.innerHTML +=
         '<div class="dial">' +
         '<div class="dial-label">' + sec + "</div>" +
         dialSVG(val, SECTION_COLORS[sec]) +
         '<div class="dial-value">' + (val || "—") + "</div>" +
         deltaHTML +
-        bandHTML +
         "</div>";
     });
+
+    // Cognitive total dial — out of 2700, the real reported number
     wrap.innerHTML +=
       '<div class="dial">' +
-      '<div class="dial-label">Combined</div>' +
-      dialSVG(anyData ? total / 4 : null, "#F5C26B") +
-      '<div class="dial-value">' + (anyData ? total : "—") + "</div>" +
-      '<div class="dial-total">sum of latest sections</div>' +
+      '<div class="dial-label">Cognitive total</div>' +
+      dialSVG(anyCognitive ? total : null, "#C05F70", 900, 2700) +
+      '<div class="dial-value">' + (anyCognitive ? total : "—") + "</div>" +
+      '<div class="dial-total">QR + DM + VR, out of 2700</div>' +
+      "</div>";
+
+    // SJT — band badge, never summed into the total above
+    const sjtLatest = latestEntryFor("SJT");
+    const sjtPrev = previousEntryFor("SJT");
+    let sjtDeltaHTML = '<div class="dial-delta delta-flat">No data yet</div>';
+    if (sjtLatest && sjtPrev && sjtLatest.band && sjtPrev.band) {
+      const d = sjtPrev.band - sjtLatest.band; // band going DOWN is an improvement
+      const cls = d > 0 ? "delta-up" : d < 0 ? "delta-down" : "delta-flat";
+      const arrow = d > 0 ? "▲" : d < 0 ? "▼" : "■";
+      sjtDeltaHTML = '<div class="dial-delta ' + cls + '">' + arrow + " " + (d !== 0 ? Math.abs(d) + " band" + (Math.abs(d) > 1 ? "s" : "") + (d > 0 ? " better" : " lower") : "same band") + "</div>";
+    } else if (sjtLatest) {
+      sjtDeltaHTML = '<div class="dial-delta delta-flat">First attempt logged</div>';
+    }
+    wrap.innerHTML +=
+      '<div class="dial">' +
+      '<div class="dial-label">SJT</div>' +
+      bandBadgeHTML(sjtLatest ? sjtLatest.band : null) +
+      sjtDeltaHTML +
       "</div>";
 
     const last = allEntriesSorted();
@@ -346,25 +465,27 @@
     if (!entries.length) {
       grid.innerHTML = '<div class="kpi"><div class="kpi-label">Get started</div><div class="kpi-value" style="font-size:15px;">Log your first attempt to populate this dashboard.</div></div>';
       ["chartOverallTrend", "chartRadar", "chartStacked", "chartMedifyOfficial"].forEach((id) => emptyState(document.getElementById(id)));
+      document.getElementById("radarSjtNote").textContent = "";
+      document.getElementById("medOffSjtNote").textContent = "";
       return;
     }
 
-    const allScaled = entries.map((e) => e.scaled);
+    const cognitiveEntries = entries.filter((e) => e.scaled !== null && e.scaled !== undefined);
+    const allScaled = cognitiveEntries.map((e) => e.scaled);
     const latest = entries[entries.length - 1];
-    const prev = entries.length > 1 ? entries[entries.length - 2] : null;
+    const prevOfLatestSection = previousEntryFor(latest.section);
 
-    const sectionAverages = SECTIONS.map((s) => ({ s, avg: sectionAverage(s) })).filter((x) => x.avg !== null);
+    const sectionAverages = COGNITIVE_SECTIONS.map((s) => ({ s, avg: sectionAverage(s) })).filter((x) => x.avg !== null);
     const best = sectionAverages.length ? sectionAverages.reduce((a, b) => (b.avg > a.avg ? b : a)) : null;
     const worst = sectionAverages.length ? sectionAverages.reduce((a, b) => (b.avg < a.avg ? b : a)) : null;
 
-    // current score = avg of last-3-per-section ability, averaged across sections with data
-    const currentPerSection = SECTIONS.map((s) => {
+    const currentPerSection = COGNITIVE_SECTIONS.map((s) => {
       const arr = bySection(s).slice(-3).map((e) => e.scaled);
       return arr.length ? mean(arr) : null;
     }).filter((v) => v !== null);
     const currentScore = currentPerSection.length ? mean(currentPerSection) : null;
 
-    const overallSlope = linregSlope(allScaled);
+    const overallSlope = allScaled.length ? linregSlope(allScaled) : 0;
     const overallTrend = trendLabel(overallSlope);
 
     const recent5 = allScaled.slice(-5);
@@ -374,25 +495,32 @@
       recentTrend = trendLabel(mean(recent5) - mean(prior5), 5);
     }
 
-    const change = prev ? latest.scaled - prev.scaled : null;
+    const latestResult = latest.section === "SJT" ? sjtBandShort(latest.band) + " (SJT)" : latest.scaled + " (" + latest.section + ")";
+    const change = latest.section === "SJT" || !prevOfLatestSection
+      ? null
+      : latest.scaled - prevOfLatestSection.scaled;
+
+    const sjtAll = bySection("SJT");
+    const sjtLatest = sjtAll.length ? sjtAll[sjtAll.length - 1] : null;
 
     const kpis = [
-      { label: "Current score", value: fmt0(currentScore), sub: "avg of last 3 per section", cls: "neutral" },
-      { label: "Latest attempt", value: latest.scaled + " (" + latest.section + ")", sub: fmtDate(latest.date), cls: "neutral" },
-      { label: "All-time average", value: fmt0(mean(allScaled)), sub: entries.length + " attempts", cls: "neutral" },
-      { label: "Highest score", value: fmt0(Math.max(...allScaled)), sub: "personal best", cls: "good" },
-      { label: "Lowest score", value: fmt0(Math.min(...allScaled)), sub: "personal worst", cls: "bad" },
+      { label: "Current cognitive score", value: fmt0(currentScore), sub: "avg of last 3 per section (QR/DM/VR)", cls: "neutral" },
+      { label: "Latest attempt", value: latestResult, sub: fmtDate(latest.date), cls: "neutral" },
+      { label: "Cognitive all-time avg", value: fmt0(mean(allScaled)), sub: cognitiveEntries.length + " QR/DM/VR attempts", cls: "neutral" },
+      { label: "Highest score", value: allScaled.length ? Math.max(...allScaled) : "—", sub: "personal best (QR/DM/VR)", cls: "good" },
+      { label: "Lowest score", value: allScaled.length ? Math.min(...allScaled) : "—", sub: "personal worst (QR/DM/VR)", cls: "bad" },
       { label: "Total attempts", value: entries.length, sub: "all sections combined", cls: "neutral" },
       { label: "Best section", value: best ? best.s : "—", sub: best ? fmt0(best.avg) + " avg" : "", cls: "good" },
       { label: "Weakest section", value: worst ? worst.s : "—", sub: worst ? fmt0(worst.avg) + " avg" : "", cls: "bad" },
-      { label: "Overall trend", value: overallTrend.label, sub: "across full history", cls: overallTrend.cls },
+      { label: "Overall trend", value: overallTrend.label, sub: "QR/DM/VR, full history", cls: overallTrend.cls },
       { label: "Recent trend", value: recentTrend.label, sub: "last 5 vs prior 5", cls: recentTrend.cls },
       {
         label: "Change vs previous",
         value: change === null ? "—" : (change > 0 ? "+" : "") + change,
-        sub: change === null ? "first attempt" : change > 0 ? "improved" : change < 0 ? "declined" : "no change",
+        sub: change === null ? (latest.section === "SJT" ? "SJT is band-based" : "first attempt") : change > 0 ? "improved" : change < 0 ? "declined" : "no change",
         cls: change === null ? "neutral" : change > 0 ? "good" : change < 0 ? "bad" : "neutral",
       },
+      { label: "Latest SJT band", value: sjtLatest ? sjtBandLabel(sjtLatest.band) : "—", sub: sjtLatest ? fmtDate(sjtLatest.date) : "no SJT logged yet", cls: "neutral" },
     ];
 
     kpis.forEach((k) => {
@@ -401,15 +529,15 @@
         '<span class="kpi-sub ' + k.cls + '">' + k.sub + "</span></div>";
     });
 
-    renderOverallTrendChart(entries);
+    renderOverallTrendChart();
     renderRadarChart();
     renderStackedChart();
     renderMedifyOfficialChart();
   }
 
-  function renderOverallTrendChart(entries) {
+  function renderOverallTrendChart() {
     const canvas = document.getElementById("chartOverallTrend");
-    const datasets = SECTIONS.map((sec) => {
+    const datasets = COGNITIVE_SECTIONS.map((sec) => {
       const arr = bySection(sec);
       return {
         label: sec,
@@ -421,6 +549,7 @@
         pointRadius: 3,
       };
     });
+    if (!datasets.some((d) => d.data.length)) { emptyState(canvas); return; }
     makeChart(canvas, {
       type: "line",
       data: { datasets },
@@ -437,29 +566,35 @@
 
   function renderRadarChart() {
     const canvas = document.getElementById("chartRadar");
-    const current = SECTIONS.map((s) => {
+    const current = COGNITIVE_SECTIONS.map((s) => {
       const l = latestEntryFor(s);
       return l ? l.scaled : 300;
     });
-    const target = SECTIONS.map((s) => DB.targets[s] || 700);
+    const target = COGNITIVE_SECTIONS.map((s) => DB.targets[s] || 700);
     makeChart(canvas, {
       type: "radar",
       data: {
-        labels: SECTIONS,
+        labels: COGNITIVE_SECTIONS,
         datasets: [
-          { label: "Current", data: current, borderColor: "#16243A", backgroundColor: "rgba(22,36,58,0.18)" },
-          { label: "Target", data: target, borderColor: "#D97706", backgroundColor: "rgba(217,119,6,0.1)", borderDash: [4, 4] },
+          { label: "Current", data: current, borderColor: "#3F3136", backgroundColor: "rgba(63,49,54,0.16)" },
+          { label: "Target", data: target, borderColor: "#C05F70", backgroundColor: "rgba(192,95,112,0.10)", borderDash: [4, 4] },
         ],
       },
       options: { scales: { r: { min: 300, max: 900, ticks: { stepSize: 150 } } }, plugins: { legend: { position: "bottom" } } },
     });
+
+    const sjtLatest = latestEntryFor("SJT");
+    const targetBand = DB.targets.SJT || 2;
+    document.getElementById("radarSjtNote").textContent =
+      "SJT: " + (sjtLatest ? sjtBandShort(sjtLatest.band) : "no data yet") + " · target Band " + targetBand + " or better";
   }
 
   function renderStackedChart() {
     const canvas = document.getElementById("chartStacked");
     const sittings = getSittings().slice(-10);
+    if (!sittings.length) { emptyState(canvas); return; }
     const labels = sittings.map((s) => fmtDate(s.date) + " · " + s.testName);
-    const datasets = SECTIONS.map((sec) => ({
+    const datasets = COGNITIVE_SECTIONS.map((sec) => ({
       label: sec,
       data: sittings.map((s) => s.sections[sec] || 0),
       backgroundColor: SECTION_COLORS[sec],
@@ -469,7 +604,7 @@
       data: { labels, datasets },
       options: {
         responsive: true,
-        scales: { x: { stacked: true, ticks: { autoSkip: false, maxRotation: 60, minRotation: 30 } }, y: { stacked: true, title: { display: true, text: "Combined scaled score" } } },
+        scales: { x: { stacked: true, ticks: { autoSkip: false, maxRotation: 60, minRotation: 30 } }, y: { stacked: true, title: { display: true, text: "Cognitive total (out of 2700)" } } },
         plugins: { legend: { position: "bottom" } },
       },
     });
@@ -479,24 +614,32 @@
     const canvas = document.getElementById("chartMedifyOfficial");
     const medify = filterEntries({ categories: ["Medify Mock"] });
     const official = filterEntries({ categories: ["UCAT Official Mock"] });
-    const labels = SECTIONS;
+    const labels = COGNITIVE_SECTIONS;
     makeChart(canvas, {
       type: "bar",
       data: {
         labels,
         datasets: [
-          { label: "Medify avg", data: SECTIONS.map((s) => fmt0(mean(medify.filter((e) => e.section === s).map((e) => e.scaled))) || 0), backgroundColor: "#2563EB" },
-          { label: "UCAT Official avg", data: SECTIONS.map((s) => fmt0(mean(official.filter((e) => e.section === s).map((e) => e.scaled))) || 0), backgroundColor: "#D97706" },
+          { label: "Medify avg", data: COGNITIVE_SECTIONS.map((s) => fmt0(mean(medify.filter((e) => e.section === s).map((e) => e.scaled))) || 0), backgroundColor: "#DB7F8E" },
+          { label: "UCAT Official avg", data: COGNITIVE_SECTIONS.map((s) => fmt0(mean(official.filter((e) => e.section === s).map((e) => e.scaled))) || 0), backgroundColor: "#604D53" },
         ],
       },
       options: { scales: { y: { min: 300, max: 900 } }, plugins: { legend: { position: "bottom" } } },
     });
+
+    const medifySjt = medify.filter((e) => e.section === "SJT").map((e) => e.band).filter(Boolean);
+    const officialSjt = official.filter((e) => e.section === "SJT").map((e) => e.band).filter(Boolean);
+    const medB = mode(medifySjt), offB = mode(officialSjt);
+    document.getElementById("medOffSjtNote").textContent =
+      "Most common SJT band — Medify: " + (medB ? "Band " + medB : "—") + " · UCAT Official: " + (offB ? "Band " + offB : "—");
   }
 
   /* =========================================================================
      SECTION ANALYTICS PAGES
      ========================================================================= */
   function renderSectionPage(sec) {
+    if (sec === "SJT") { renderSjtSectionPage(); return; }
+
     const page = pages[sec];
     const entries = bySection(sec);
     const kpiGrid = page.querySelector(".sec-kpis");
@@ -519,7 +662,6 @@
     const slope = linregSlope(scaledArr);
     const trend = trendLabel(slope);
 
-    // improvement rate: % of consecutive transitions that improved
     let improves = 0, transitions = 0, biggestJump = -Infinity, streak = 0, longestStreak = 0;
     for (let i = 1; i < scaledArr.length; i++) {
       transitions++;
@@ -529,8 +671,7 @@
     }
     const improvementRate = transitions ? (improves / transitions) * 100 : null;
 
-    // points lost to weakest-vs-strongest comparison
-    const otherAverages = SECTIONS.filter((s) => s !== sec).map((s) => sectionAverage(s)).filter((v) => v !== null);
+    const otherAverages = COGNITIVE_SECTIONS.filter((s) => s !== sec).map((s) => sectionAverage(s)).filter((v) => v !== null);
     const bestOtherOrSelf = Math.max(avg, ...(otherAverages.length ? otherAverages : [avg]));
     const gapToStrongest = bestOtherOrSelf - avg;
 
@@ -563,7 +704,6 @@
       statList.innerHTML += '<div class="stat-item"><div class="v">' + s.v + '</div><div class="k">' + s.k + "</div></div>";
     });
 
-    // trend chart with rolling average
     const roll = rollingAverage(scaledArr, 3);
     makeChart(page.querySelector(".chart-trend"), {
       type: "line",
@@ -571,13 +711,12 @@
         labels: entries.map((e) => fmtDate(e.date)),
         datasets: [
           { label: "Scaled score", data: scaledArr, borderColor: SECTION_COLORS[sec], backgroundColor: SECTION_COLORS[sec], tension: 0.25, pointRadius: 3 },
-          { label: "Rolling avg (3)", data: roll, borderColor: "#9AA3B2", borderDash: [5, 4], pointRadius: 0, tension: 0.25 },
+          { label: "Rolling avg (3)", data: roll, borderColor: "#9DA3A4", borderDash: [5, 4], pointRadius: 0, tension: 0.25 },
         ],
       },
       options: { scales: { y: { min: 300, max: 900 } }, plugins: { legend: { position: "bottom" } } },
     });
 
-    // distribution chart (histogram by 50pt buckets)
     const buckets = {};
     for (let b = 300; b < 900; b += 50) buckets[b] = 0;
     scaledArr.forEach((v) => {
@@ -593,15 +732,107 @@
       options: { plugins: { legend: { display: false } }, scales: { y: { ticks: { stepSize: 1 } } } },
     });
 
-    // recent performance (last 8)
     const recent = entries.slice(-8);
     makeChart(page.querySelector(".chart-recent"), {
       type: "bar",
       data: {
         labels: recent.map((e) => fmtDate(e.date)),
-        datasets: [{ label: "Scaled score", data: recent.map((e) => e.scaled), backgroundColor: recent.map((e, i, a) => (i === 0 ? SECTION_COLORS[sec] : a[i - 1].scaled <= e.scaled ? "#16A34A" : "#DC2626")) }],
+        datasets: [{ label: "Scaled score", data: recent.map((e) => e.scaled), backgroundColor: recent.map((e, i, a) => (i === 0 ? SECTION_COLORS[sec] : a[i - 1].scaled <= e.scaled ? "#4F7A5B" : "#AD4A48")) }],
       },
       options: { scales: { y: { min: 300, max: 900 } }, plugins: { legend: { display: false } } },
+    });
+  }
+
+  function renderSjtSectionPage() {
+    const page = pages.SJT;
+    const entries = bySection("SJT");
+    const kpiGrid = page.querySelector(".sec-kpis");
+    const statList = page.querySelector(".sec-stats");
+    kpiGrid.innerHTML = "";
+    statList.innerHTML = "";
+
+    if (!entries.length) {
+      kpiGrid.innerHTML = '<div class="kpi"><div class="kpi-label">No data yet</div><div class="kpi-value" style="font-size:14px;">Log an SJT attempt to see analytics.</div></div>';
+      ["trend", "dist", "recent"].forEach((t) => emptyState(page.querySelector(".chart-" + t)));
+      return;
+    }
+
+    const withRaw = entries.filter((e) => e.raw !== null && e.raw !== undefined);
+    const rawArr = withRaw.map((e) => e.raw);
+    const bandArr = entries.map((e) => e.band).filter(Boolean);
+    const latest = entries[entries.length - 1];
+    const prev = entries.length > 1 ? entries[entries.length - 2] : null;
+    const avgRaw = mean(rawArr);
+    const medRaw = median(rawArr);
+    const sdRaw = stdev(rawArr);
+    const slope = rawArr.length > 1 ? linregSlope(rawArr) : 0;
+    const trend = trendLabel(slope, 1);
+    const commonBand = mode(bandArr);
+
+    const bandChange = prev && latest.band && prev.band ? prev.band - latest.band : null; // positive = improvement
+    const targetBand = DB.targets.SJT || 2;
+
+    const kpis = [
+      { label: "Latest band", value: sjtBandLabel(latest.band), sub: fmtDate(latest.date), cls: "neutral" },
+      { label: "Change vs previous", value: bandChange === null ? "—" : (bandChange > 0 ? "improved " + bandChange + " band" + (bandChange > 1 ? "s" : "") : bandChange < 0 ? "down " + Math.abs(bandChange) + " band" + (Math.abs(bandChange) > 1 ? "s" : "") : "no change"), sub: "lower band number is better", cls: bandChange === null ? "neutral" : bandChange > 0 ? "good" : bandChange < 0 ? "bad" : "neutral" },
+      { label: "Average raw mark", value: fmt0(avgRaw), sub: withRaw.length + " attempts with raw marks", cls: "neutral" },
+      { label: "Most common band", value: commonBand ? sjtBandLabel(commonBand) : "—", sub: SJT_BAND_INFO[commonBand] ? SJT_BAND_INFO[commonBand].label : "", cls: "neutral" },
+      { label: "Raw mark trend", value: trend.label, sub: "linear fit slope " + fmt1(slope), cls: trend.cls },
+      { label: "Target gap", value: latest.band ? (latest.band <= targetBand ? "Reached" : "Band " + (latest.band - targetBand) + " to go") : "—", sub: "target Band " + targetBand, cls: latest.band && latest.band <= targetBand ? "good" : "bad" },
+    ];
+    kpis.forEach((k) => {
+      kpiGrid.innerHTML += '<div class="kpi"><div class="kpi-label">' + k.label + '</div><div class="kpi-value">' + k.value + '</div><span class="kpi-sub ' + k.cls + '">' + k.sub + "</span></div>";
+    });
+
+    const stats = [
+      { k: "Mean raw mark", v: fmt0(avgRaw) },
+      { k: "Median raw mark", v: fmt0(medRaw) },
+      { k: "Std deviation (raw)", v: sdRaw === null ? "—" : fmt1(sdRaw) },
+      { k: "Band 1 attempts", v: bandArr.filter((b) => b === 1).length },
+      { k: "Band 2 attempts", v: bandArr.filter((b) => b === 2).length },
+      { k: "Band 3 attempts", v: bandArr.filter((b) => b === 3).length },
+      { k: "Band 4 attempts", v: bandArr.filter((b) => b === 4).length },
+      { k: "Total SJT attempts logged", v: entries.length },
+    ];
+    stats.forEach((s) => {
+      statList.innerHTML += '<div class="stat-item"><div class="v">' + s.v + '</div><div class="k">' + s.k + "</div></div>";
+    });
+
+    if (withRaw.length) {
+      const roll = rollingAverage(rawArr, 3);
+      makeChart(page.querySelector(".chart-trend"), {
+        type: "line",
+        data: {
+          labels: withRaw.map((e) => fmtDate(e.date)),
+          datasets: [
+            { label: "Raw mark", data: rawArr, borderColor: SECTION_COLORS.SJT, backgroundColor: SECTION_COLORS.SJT, tension: 0.25, pointRadius: 3 },
+            { label: "Rolling avg (3)", data: roll, borderColor: "#9DA3A4", borderDash: [5, 4], pointRadius: 0, tension: 0.25 },
+          ],
+        },
+        options: { scales: { y: { min: 0, max: 69, title: { display: true, text: "Raw mark (/69)" } } }, plugins: { legend: { position: "bottom" } } },
+      });
+    } else {
+      emptyState(page.querySelector(".chart-trend"));
+    }
+
+    const bandCounts = [1, 2, 3, 4].map((b) => bandArr.filter((x) => x === b).length);
+    makeChart(page.querySelector(".chart-dist"), {
+      type: "bar",
+      data: {
+        labels: ["Band 1", "Band 2", "Band 3", "Band 4"],
+        datasets: [{ label: "Attempts", data: bandCounts, backgroundColor: ["#E1ECE2", "#F3EAD2", "#F6E2D7", "#F6E0DE"], borderColor: SECTION_COLORS.SJT, borderWidth: 1 }],
+      },
+      options: { plugins: { legend: { display: false } }, scales: { y: { ticks: { stepSize: 1 } } } },
+    });
+
+    const recent = entries.slice(-8);
+    makeChart(page.querySelector(".chart-recent"), {
+      type: "bar",
+      data: {
+        labels: recent.map((e) => fmtDate(e.date)),
+        datasets: [{ label: "Band (1=best)", data: recent.map((e) => e.band || null), backgroundColor: SECTION_COLORS.SJT }],
+      },
+      options: { scales: { y: { min: 1, max: 4, reverse: true, ticks: { stepSize: 1 } } }, plugins: { legend: { display: false } } },
     });
   }
 
@@ -615,18 +846,21 @@
     if (!sittings.length) {
       kpiGrid.innerHTML = '<div class="kpi"><div class="kpi-label">No mocks yet</div><div class="kpi-value" style="font-size:14px;">Log a Full Mock, Medify Mock or UCAT Official Mock to populate this page.</div></div>';
       emptyState(document.getElementById("chartFmOverall"));
+      emptyState(document.getElementById("chartFmSjtBand"));
       emptyState(document.getElementById("chartTimedUntimed"));
       document.getElementById("sittingsBody").innerHTML = "";
+      document.getElementById("sjtSummaryBlock").innerHTML = "";
       return;
     }
-    const totals = sittings.map((s) => SECTIONS.reduce((sum, sec) => sum + (s.sections[sec] || 0), 0)).filter((t) => t > 0);
+    const totals = sittings.map((s) => cognitiveTotal(s.sections)).filter((t) => t > 0);
     const latest = sittings[sittings.length - 1];
-    const latestTotal = SECTIONS.reduce((sum, sec) => sum + (latest.sections[sec] || 0), 0);
+    const latestTotal = cognitiveTotal(latest.sections);
     const kpis = [
       { label: "Mocks sat", value: sittings.length, sub: "full sittings logged", cls: "neutral" },
-      { label: "Latest total", value: latestTotal, sub: fmtDate(latest.date), cls: "neutral" },
-      { label: "Best total", value: Math.max(...totals), sub: "personal best sitting", cls: "good" },
-      { label: "Average total", value: fmt0(mean(totals)), sub: "across all sittings", cls: "neutral" },
+      { label: "Latest cognitive total", value: latestTotal + " / 2700", sub: fmtDate(latest.date), cls: "neutral" },
+      { label: "Best total", value: (totals.length ? Math.max(...totals) : "—") + " / 2700", sub: "personal best sitting", cls: "good" },
+      { label: "Average total", value: fmt0(mean(totals)) + " / 2700", sub: "across all sittings", cls: "neutral" },
+      { label: "Latest SJT band", value: latest.sjtBand ? sjtBandLabel(latest.sjtBand) : "—", sub: "from latest full sitting", cls: "neutral" },
     ];
     kpis.forEach((k) => {
       kpiGrid.innerHTML += '<div class="kpi"><div class="kpi-label">' + k.label + '</div><div class="kpi-value">' + k.value + '</div><span class="kpi-sub ' + k.cls + '">' + k.sub + "</span></div>";
@@ -636,33 +870,56 @@
       type: "line",
       data: {
         labels: sittings.map((s) => fmtDate(s.date) + " · " + s.testName),
-        datasets: [{ label: "Total scaled score", data: sittings.map((s) => SECTIONS.reduce((sum, sec) => sum + (s.sections[sec] || 0), 0)), borderColor: "#16243A", backgroundColor: "#16243A", tension: 0.25, pointRadius: 3 }],
+        datasets: [{ label: "Cognitive total (/2700)", data: sittings.map((s) => cognitiveTotal(s.sections)), borderColor: "#3F3136", backgroundColor: "#3F3136", tension: 0.25, pointRadius: 3 }],
       },
-      options: { plugins: { legend: { display: false } } },
+      options: { scales: { y: { min: 900, max: 2700 } }, plugins: { legend: { display: false } } },
     });
+
+    const sjtSittings = sittings.filter((s) => s.sjtBand);
+    if (sjtSittings.length) {
+      makeChart(document.getElementById("chartFmSjtBand"), {
+        type: "line",
+        data: {
+          labels: sittings.map((s) => fmtDate(s.date) + " · " + s.testName),
+          datasets: [{ label: "SJT band", data: sittings.map((s) => s.sjtBand || null), borderColor: SECTION_COLORS.SJT, backgroundColor: SECTION_COLORS.SJT, stepped: true, pointRadius: 4, spanGaps: true }],
+        },
+        options: { scales: { y: { min: 1, max: 4, reverse: true, ticks: { stepSize: 1 } } }, plugins: { legend: { display: false } } },
+      });
+    } else {
+      emptyState(document.getElementById("chartFmSjtBand"));
+    }
 
     const timed = filterEntries({ categories: ["Timed Practice"] });
     const untimed = filterEntries({ categories: ["Untimed Practice"] });
     makeChart(document.getElementById("chartTimedUntimed"), {
       type: "bar",
       data: {
-        labels: SECTIONS,
+        labels: COGNITIVE_SECTIONS,
         datasets: [
-          { label: "Timed avg", data: SECTIONS.map((s) => fmt0(mean(timed.filter((e) => e.section === s).map((e) => e.scaled))) || 0), backgroundColor: "#2563EB" },
-          { label: "Untimed avg", data: SECTIONS.map((s) => fmt0(mean(untimed.filter((e) => e.section === s).map((e) => e.scaled))) || 0), backgroundColor: "#9AA3B2" },
+          { label: "Timed avg", data: COGNITIVE_SECTIONS.map((s) => fmt0(mean(timed.filter((e) => e.section === s).map((e) => e.scaled))) || 0), backgroundColor: "#DB7F8E" },
+          { label: "Untimed avg", data: COGNITIVE_SECTIONS.map((s) => fmt0(mean(untimed.filter((e) => e.section === s).map((e) => e.scaled))) || 0), backgroundColor: "#9DA3A4" },
         ],
       },
       options: { scales: { y: { min: 300, max: 900 } }, plugins: { legend: { position: "bottom" } } },
     });
 
+    const allSjt = bySection("SJT");
+    const sjtSummary = document.getElementById("sjtSummaryBlock");
+    const avgRaw = mean(allSjt.filter((e) => e.raw !== null && e.raw !== undefined).map((e) => e.raw));
+    const commonBand = mode(allSjt.map((e) => e.band).filter(Boolean));
+    sjtSummary.innerHTML =
+      '<div class="pred-item"><div class="v" style="color:' + SECTION_COLORS.SJT + '">' + fmt0(avgRaw) + '</div><div class="k">Average raw mark</div></div>' +
+      '<div class="pred-item"><div class="v" style="color:' + SECTION_COLORS.SJT + '">' + (commonBand ? sjtBandLabel(commonBand) : "—") + '</div><div class="k">Most common band</div></div>';
+
     const body = document.getElementById("sittingsBody");
     body.innerHTML = "";
     [...sittings].reverse().forEach((s) => {
-      const total = SECTIONS.reduce((sum, sec) => sum + (s.sections[sec] || 0), 0);
+      const total = cognitiveTotal(s.sections);
       body.innerHTML +=
         "<tr><td>" + fmtDate(s.date) + "</td><td>" + esc(s.testName) + "</td><td>" + s.category + "</td><td>" + esc(s.source || "—") + "</td>" +
-        SECTIONS.map((sec) => "<td>" + (s.sections[sec] || "—") + "</td>").join("") +
-        "<td><strong>" + total + "</strong></td></tr>";
+        COGNITIVE_SECTIONS.map((sec) => "<td>" + (s.sections[sec] || "—") + "</td>").join("") +
+        "<td><strong>" + total + "</strong></td>" +
+        "<td>" + (s.sjtBand ? sjtBandLabel(s.sjtBand) : "—") + "</td></tr>";
     });
   }
 
@@ -678,29 +935,45 @@
       document.getElementById("miniBody").innerHTML = "";
       return;
     }
-    makeChart(trendCanvas, {
-      type: "line",
-      data: {
-        datasets: SECTIONS.map((sec) => ({
-          label: sec,
-          data: entries.filter((e) => e.section === sec).map((e) => ({ x: e.date, y: e.scaled })),
-          borderColor: SECTION_COLORS[sec],
-          backgroundColor: SECTION_COLORS[sec],
-          tension: 0.25,
-          spanGaps: true,
-        })),
-      },
-      options: { scales: { x: { type: "time", time: { unit: "week" } }, y: { min: 300, max: 900 } }, plugins: { legend: { position: "bottom" } } },
-    });
-    makeChart(avgCanvas, {
-      type: "bar",
-      data: { labels: SECTIONS, datasets: [{ label: "Mini-mock average", data: SECTIONS.map((s) => fmt0(mean(entries.filter((e) => e.section === s).map((e) => e.scaled))) || 0), backgroundColor: SECTIONS.map((s) => SECTION_COLORS[s]) }] },
-      options: { scales: { y: { min: 300, max: 900 } }, plugins: { legend: { display: false } } },
-    });
+    const cognitive = entries.filter((e) => e.section !== "SJT");
+    if (cognitive.length) {
+      makeChart(trendCanvas, {
+        type: "line",
+        data: {
+          datasets: COGNITIVE_SECTIONS.map((sec) => ({
+            label: sec,
+            data: entries.filter((e) => e.section === sec).map((e) => ({ x: e.date, y: e.scaled })),
+            borderColor: SECTION_COLORS[sec],
+            backgroundColor: SECTION_COLORS[sec],
+            tension: 0.25,
+            spanGaps: true,
+          })),
+        },
+        options: { scales: { x: { type: "time", time: { unit: "week" } }, y: { min: 300, max: 900 } }, plugins: { legend: { position: "bottom" } } },
+      });
+      makeChart(avgCanvas, {
+        type: "bar",
+        data: { labels: COGNITIVE_SECTIONS, datasets: [{ label: "Mini-mock average", data: COGNITIVE_SECTIONS.map((s) => fmt0(mean(entries.filter((e) => e.section === s).map((e) => e.scaled))) || 0), backgroundColor: COGNITIVE_SECTIONS.map((s) => SECTION_COLORS[s]) }] },
+        options: { scales: { y: { min: 300, max: 900 } }, plugins: { legend: { display: false } } },
+      });
+    } else {
+      emptyState(trendCanvas); emptyState(avgCanvas);
+    }
+
+    const sjtMini = entries.filter((e) => e.section === "SJT");
+    if (sjtMini.length) {
+      const avgRaw = mean(sjtMini.filter((e) => e.raw !== null && e.raw !== undefined).map((e) => e.raw));
+      const commonBand = mode(sjtMini.map((e) => e.band).filter(Boolean));
+      document.getElementById("miniSjtNote").textContent =
+        sjtMini.length + " SJT mini-mock(s) logged · average raw " + fmt0(avgRaw) + " · most common " + (commonBand ? sjtBandLabel(commonBand) : "band: —");
+    } else {
+      document.getElementById("miniSjtNote").textContent = "";
+    }
+
     const body = document.getElementById("miniBody");
     body.innerHTML = "";
     [...entries].reverse().forEach((e) => {
-      body.innerHTML += "<tr><td>" + fmtDate(e.date) + "</td><td>" + esc(e.testName) + "</td><td>" + esc(e.source || "—") + "</td><td><span class='tag tag-" + e.section.toLowerCase() + "'>" + e.section + "</span></td><td>" + e.raw + "/" + e.maxRaw + "</td><td>" + e.scaled + "</td><td>" + fmt0(e.accuracy) + "%</td><td>" + (e.time || "—") + "m</td></tr>";
+      body.innerHTML += "<tr><td>" + fmtDate(e.date) + "</td><td>" + esc(e.testName) + "</td><td>" + esc(e.source || "—") + "</td><td><span class='tag tag-" + e.section.toLowerCase() + "'>" + e.section + "</span></td><td>" + (e.raw !== null ? e.raw + "/" + e.maxRaw : "—") + "</td><td>" + resultShort(e) + "</td><td>" + fmt0(e.accuracy) + "%</td><td>" + (e.time || "—") + "m</td></tr>";
     });
   }
 
@@ -728,7 +1001,7 @@
           borderColor: SECTION_COLORS[sec], backgroundColor: SECTION_COLORS[sec], tension: 0.25, spanGaps: true,
         })),
       },
-      options: { scales: { x: { type: "time", time: { unit: "week" } }, y: { min: 0, max: 100, title: { display: true, text: "Accuracy %" } } }, plugins: { legend: { position: "bottom" } } },
+      options: { scales: { x: { type: "time", time: { unit: "week" } }, y: { min: 0, max: 100, title: { display: true, text: "Raw mark %" } } }, plugins: { legend: { position: "bottom" } } },
     });
 
     makeChart(compCanvas, {
@@ -760,7 +1033,7 @@
     const labels = Object.keys(mistakeCounts);
     makeChart(mistakeCanvas, {
       type: "bar",
-      data: { labels, datasets: [{ label: "Times logged", data: labels.map((l) => mistakeCounts[l]), backgroundColor: "#7C3AED" }] },
+      data: { labels, datasets: [{ label: "Times logged", data: labels.map((l) => mistakeCounts[l]), backgroundColor: "#604D53" }] },
       options: { indexAxis: "y", plugins: { legend: { display: false } } },
     });
   }
@@ -768,12 +1041,23 @@
   /* =========================================================================
      TARGETS & PREDICTION PAGE
      ========================================================================= */
+  function renderBandRefTable(el) {
+    if (!el) return;
+    el.innerHTML =
+      "<tr><th>Band</th><th>Raw marks (/69)</th><th>What it represents</th></tr>" +
+      [1, 2, 3, 4].map((b) =>
+        "<tr><td><span class='band-pill b" + b + "'>Band " + b + "</span></td><td>" + SJT_BAND_INFO[b].rangeLabel + "</td>" +
+        "<td><strong>" + SJT_BAND_INFO[b].label + ":</strong> " + SJT_BAND_INFO[b].desc + "</td></tr>"
+      ).join("");
+  }
+
   function renderTargetsPage() {
-    SECTIONS.forEach((s) => { document.getElementById("t_" + s).value = DB.targets[s] || ""; });
+    COGNITIVE_SECTIONS.forEach((s) => { document.getElementById("t_" + s).value = DB.targets[s] || ""; });
+    document.getElementById("t_SJT").value = DB.targets.SJT || 2;
 
     const bars = document.getElementById("progressBars");
     bars.innerHTML = "";
-    SECTIONS.forEach((sec) => {
+    COGNITIVE_SECTIONS.forEach((sec) => {
       const latest = latestEntryFor(sec);
       const target = DB.targets[sec] || 700;
       const current = latest ? latest.scaled : 300;
@@ -784,12 +1068,23 @@
         '<div class="progress-track"><div class="progress-fill" style="width:' + pct + "%; background:" + SECTION_COLORS[sec] + ';"></div></div></div>';
     });
 
+    // SJT progress — band scale, lower is better, so map Band1=100%, Band4=25%
+    const sjtLatest = latestEntryFor("SJT");
+    const targetBand = DB.targets.SJT || 2;
+    const currentBand = sjtLatest ? sjtLatest.band : null;
+    const pctOf = (b) => b ? ((4 - b + 1) / 4) * 100 : 0;
+    const reached = currentBand && currentBand <= targetBand;
+    bars.innerHTML +=
+      '<div class="progress-item"><div class="top-row"><span>' + SECTION_NAMES.SJT + '</span><span>' +
+      (currentBand ? "Band " + currentBand : "No data") + " (target Band " + targetBand + ") — " + (currentBand ? (reached ? "target reached" : "Band " + (currentBand - targetBand) + " to go") : "log an attempt") +
+      '</span></div><div class="progress-track"><div class="progress-fill" style="width:' + pctOf(currentBand) + "%; background:" + SECTION_COLORS.SJT + ';"></div></div></div>';
+
     const predBlock = document.getElementById("predictionBlock");
     predBlock.innerHTML = "";
     const weights = [5, 4, 3, 2, 1];
     let predTotal = 0, predCount = 0;
-    SECTIONS.forEach((sec) => {
-      const arr = filterEntries({ section: sec, categories: FULLMOCK_LIKE }).slice(-5).reverse(); // most recent first
+    COGNITIVE_SECTIONS.forEach((sec) => {
+      const arr = filterEntries({ section: sec, categories: FULLMOCK_LIKE }).slice(-5).reverse();
       let predicted = null;
       if (arr.length) {
         let wsum = 0, wtotal = 0;
@@ -799,8 +1094,20 @@
       }
       predBlock.innerHTML += '<div class="pred-item"><div class="v" style="color:' + SECTION_COLORS[sec] + '">' + (predicted || "—") + '</div><div class="k">' + sec + " predicted</div></div>";
     });
-    predBlock.innerHTML += '<div class="pred-item"><div class="v">' + (predCount ? fmt0(predTotal / predCount) : "—") + '</div><div class="k">Predicted average</div></div>';
-    predBlock.innerHTML += '<div class="pred-item"><div class="v">' + (predCount ? predTotal : "—") + '</div><div class="k">Predicted combined total</div></div>';
+    predBlock.innerHTML += '<div class="pred-item"><div class="v">' + (predCount ? fmt0(predTotal / predCount) : "—") + '</div><div class="k">Predicted average (scaled)</div></div>';
+    predBlock.innerHTML += '<div class="pred-item"><div class="v">' + (predCount === 3 ? predTotal : "—") + '</div><div class="k">Predicted cognitive total /2700</div></div>';
+
+    // predicted SJT band — weighted average of recent full-mock bands, rounded
+    const sjtArr = filterEntries({ section: "SJT", categories: FULLMOCK_LIKE }).slice(-5).reverse().filter((e) => e.band);
+    let predictedBand = null;
+    if (sjtArr.length) {
+      let wsum = 0, wtotal = 0;
+      sjtArr.forEach((e, i) => { const w = weights[i] || 1; wsum += e.band * w; wtotal += w; });
+      predictedBand = clamp(Math.round(wsum / wtotal), 1, 4);
+    }
+    predBlock.innerHTML += '<div class="pred-item"><div class="v" style="color:' + SECTION_COLORS.SJT + '">' + (predictedBand ? sjtBandLabel(predictedBand) : "—") + '</div><div class="k">SJT predicted band</div></div>';
+
+    renderBandRefTable(document.getElementById("bandRefTableTargets"));
   }
 
   /* =========================================================================
@@ -840,7 +1147,7 @@
     const body = document.getElementById("entriesBody");
     body.innerHTML = "";
     if (!entries.length) {
-      body.innerHTML = '<tr><td colspan="12" style="text-align:center; color:#9aa0a8; padding:20px;">No entries match these filters.</td></tr>';
+      body.innerHTML = '<tr><td colspan="12" style="text-align:center; color:#A6898E; padding:20px;">No entries match these filters.</td></tr>';
       return;
     }
     entries.forEach((e) => {
@@ -851,10 +1158,10 @@
         "<td>" + e.category + "</td>" +
         "<td>" + esc(e.source || "—") + "</td>" +
         "<td><span class='tag tag-" + e.section.toLowerCase() + "'>" + e.section + "</span></td>" +
-        "<td>" + e.raw + "</td>" +
-        "<td>" + e.maxRaw + "</td>" +
-        "<td><strong>" + e.scaled + "</strong></td>" +
-        "<td>" + fmt0(e.accuracy) + "%</td>" +
+        "<td>" + (e.raw !== null && e.raw !== undefined ? e.raw : "—") + "</td>" +
+        "<td>" + (e.maxRaw !== null && e.maxRaw !== undefined ? e.maxRaw : "—") + "</td>" +
+        "<td><strong>" + resultShort(e) + "</strong></td>" +
+        "<td>" + (e.accuracy !== null && e.accuracy !== undefined ? fmt0(e.accuracy) + "%" : "—") + "</td>" +
         "<td>" + (e.time || "—") + "m</td>" +
         "<td>" + esc((e.notes || "").slice(0, 40)) + "</td>" +
         "<td><button class='del-btn' data-del='" + e.id + "'>Delete</button></td>" +
@@ -901,17 +1208,24 @@
         "<td><input type='number' class='m_raw' min='0' placeholder='raw'></td>" +
         "<td><input type='number' class='m_max' min='1' value='" + info.maxRaw + "'></td>" +
         "<td><input type='number' class='m_time' min='0' value='" + info.time + "'></td>" +
-        "<td><output class='m_scaled'>—</output></td>";
+        "<td><input type='number' class='m_attempted' min='0' placeholder='all'></td>" +
+        "<td><output class='m_scaled m_band_out'>—</output></td>";
       tbody.appendChild(row);
-      row.querySelector(".m_raw").addEventListener("input", () => updateMultiRowScaled(row));
-      row.querySelector(".m_max").addEventListener("input", () => updateMultiRowScaled(row));
+      row.querySelector(".m_raw").addEventListener("input", () => updateMultiRowScaled(row, sec));
+      row.querySelector(".m_max").addEventListener("input", () => updateMultiRowScaled(row, sec));
     });
   }
-  function updateMultiRowScaled(row) {
+  function updateMultiRowScaled(row, sec) {
     const raw = parseFloat(row.querySelector(".m_raw").value);
     const max = parseFloat(row.querySelector(".m_max").value);
-    const s = suggestScaled(raw, max);
-    row.querySelector(".m_scaled").textContent = s || "—";
+    const out = row.querySelector(".m_scaled");
+    if (sec === "SJT") {
+      const band = computeSjtBand(raw, max);
+      out.textContent = band ? "Band " + band : "—";
+    } else {
+      const s = suggestScaled(raw, max);
+      out.textContent = s || "—";
+    }
   }
 
   // Suggests "Category N" as a test name unless the person has typed their own.
@@ -930,17 +1244,21 @@
     }
   }
 
-  // Mock type drives whether "log all four sections" is auto-checked, and whether a
-  // standard section time is assumed (full mocks & timed practice are timed; mini-mocks
-  // and untimed practice are left blank for the person to fill in if relevant).
+  // Mock type drives whether "log all four sections" is auto-checked, whether a
+  // standard section time/raw count is assumed, and shows a short contextual note —
+  // this is what makes the form adapt to full mocks vs mini-mocks vs practice sets.
   function applyCategoryDefaults() {
     const category = document.getElementById("f_category").value;
+    const profile = MOCK_PROFILES[category] || {};
     if (!multiManuallyToggled) {
-      document.getElementById("f_multiSection").checked = FULLMOCK_LIKE.includes(category);
+      document.getElementById("f_multiSection").checked = !!profile.forceMulti;
       toggleMultiSection();
     }
+    document.getElementById("categoryInfo").textContent = profile.note || "";
     applyTestNameSuggestion();
     applyTimeDefault();
+    applySectionDefaults();
+    DB.settings.lastCategory = category;
   }
 
   function applyTimeDefault() {
@@ -950,32 +1268,42 @@
     document.getElementById("f_time").value = TIMED_LIKE.includes(category) ? STANDARD_SECTION_INFO[section].time : "";
   }
 
-  // Section dropdown drives the standard raw-mark structure. Switching sections always
-  // refreshes these to that section's standard, since a new section means a fresh attempt.
+  // Section dropdown drives the standard raw-mark structure (unless the mock type
+  // calls for custom counts, e.g. mini-mocks), and toggles SJT-specific UI.
   function applySectionDefaults() {
     const section = document.getElementById("f_section").value;
+    const category = document.getElementById("f_category").value;
+    const profile = MOCK_PROFILES[category] || {};
     const info = STANDARD_SECTION_INFO[section];
     maxManuallyEdited = false;
     qManuallyEdited = false;
     scaledManuallyEdited = false;
-    document.getElementById("f_maxRaw").value = info.maxRaw;
+    if (profile.customCounts) {
+      document.getElementById("f_maxRaw").value = "";
+      document.getElementById("f_maxRaw").placeholder = "e.g. " + info.maxRaw + " (varies by platform)";
+    } else {
+      document.getElementById("f_maxRaw").value = info.maxRaw;
+    }
     syncQuestionsInSet();
     applyTimeDefault();
-    toggleSjtBand();
+    toggleSectionUI(section);
     updateScaledSuggestion();
     updateAccuracyPreview();
+    updateBandPreview();
   }
 
   function syncQuestionsInSet() {
     if (qManuallyEdited) return;
     document.getElementById("f_qCount").value = document.getElementById("f_maxRaw").value;
-    document.getElementById("f_attempted").placeholder = "defaults to " + document.getElementById("f_qCount").value;
+    document.getElementById("f_attempted").placeholder = "defaults to " + (document.getElementById("f_qCount").value || "max");
   }
 
   function resetLogForm() {
     document.getElementById("logForm").reset();
     document.getElementById("f_date").value = new Date().toISOString().slice(0, 10);
     document.getElementById("f_source").value = DB.settings.lastSource || "";
+    document.getElementById("f_category").value = DB.settings.lastCategory || "Full Mock";
+    document.getElementById("f_sjtBandOnly").checked = false;
     scaledManuallyEdited = false;
     maxManuallyEdited = false;
     qManuallyEdited = false;
@@ -985,9 +1313,10 @@
     document.querySelectorAll("#mistakeChips input").forEach((c) => (c.checked = false));
     buildMultiTable();
     applyTestNameSuggestion();
-    applySectionDefaults();
     applyCategoryDefaults();
     document.getElementById("advancedFields").open = false;
+    document.getElementById("completionDetails").open = false;
+    document.getElementById("bandRefDetails").open = false;
   }
 
   function toggleMultiSection() {
@@ -996,13 +1325,32 @@
     document.getElementById("multiSectionBlock").classList.toggle("hidden", !multi);
   }
 
-  function toggleSjtBand() {
-    const isSjt = document.getElementById("f_section").value === "SJT";
+  function toggleSectionUI(section) {
+    const isSjt = section === "SJT";
+    document.getElementById("scaledWrap").classList.toggle("hidden", isSjt);
     document.getElementById("sjtBandWrap").classList.toggle("hidden", !isSjt);
+    document.getElementById("sjtBandOnlyRow").classList.toggle("hidden", !isSjt);
+    document.getElementById("bandRefDetails").classList.toggle("hidden", !isSjt);
+    if (!isSjt) {
+      document.getElementById("f_sjtBandOnly").checked = false;
+      toggleSjtBandOnly();
+    }
+  }
+
+  function toggleSjtBandOnly() {
+    const bandOnly = document.getElementById("f_sjtBandOnly").checked;
+    document.getElementById("sjtManualBandWrap").classList.toggle("hidden", !bandOnly);
+    document.getElementById("f_raw").closest("label").classList.toggle("hidden", bandOnly);
+    document.getElementById("f_maxRaw").closest("label").classList.toggle("hidden", bandOnly);
+    document.getElementById("f_time").closest("label").classList.toggle("hidden", bandOnly);
+    document.getElementById("sjtBandWrap").classList.toggle("hidden", bandOnly);
+    updateBandPreview();
   }
 
   function updateScaledSuggestion() {
     if (scaledManuallyEdited) return;
+    const section = document.getElementById("f_section").value;
+    if (section === "SJT") { document.getElementById("f_scaled").value = ""; return; }
     const raw = parseFloat(document.getElementById("f_raw").value);
     const max = parseFloat(document.getElementById("f_maxRaw").value);
     const s = suggestScaled(raw, max);
@@ -1014,6 +1362,16 @@
     const max = parseFloat(document.getElementById("f_maxRaw").value);
     const out = document.getElementById("f_accuracyPreview");
     out.textContent = !isNaN(raw) && max ? fmt0(clamp((raw / max) * 100, 0, 100)) + "%" : "—";
+  }
+
+  function updateBandPreview() {
+    const section = document.getElementById("f_section").value;
+    const out = document.getElementById("f_bandPreview");
+    if (!out || section !== "SJT") return;
+    const raw = parseFloat(document.getElementById("f_raw").value);
+    const max = parseFloat(document.getElementById("f_maxRaw").value) || STANDARD_SECTION_INFO.SJT.maxRaw;
+    const band = computeSjtBand(raw, max);
+    out.innerHTML = band ? '<span class="band-pill b' + band + '">Band ' + band + "</span> " + SJT_BAND_INFO[band].label : "—";
   }
 
   function handleLogSubmit(ev) {
@@ -1039,46 +1397,108 @@
         const max = parseFloat(row.querySelector(".m_max").value);
         if (isNaN(raw) || isNaN(max) || max <= 0) return; // skip blank rows
         const time = parseFloat(row.querySelector(".m_time").value) || null;
-        const scaled = suggestScaled(raw, max);
-        DB.entries.push({
-          id: uid(), sittingId, date, testName, category, source, section: sec,
-          raw, maxRaw: max, qCount: max, attempted: max, time, scaled,
-          accuracy: (raw / max) * 100, completion: 100, band: null, mistakes: [], notes, createdAt,
-        });
+        const attemptedVal = row.querySelector(".m_attempted").value;
+        const attempted = attemptedVal !== "" ? parseFloat(attemptedVal) : max;
+        const completion = max ? (attempted / max) * 100 : null;
+        const accuracy = (raw / max) * 100;
+        if (sec === "SJT") {
+          const band = computeSjtBand(raw, max);
+          DB.entries.push({
+            id: uid(), sittingId, date, testName, category, source, section: sec,
+            raw, maxRaw: max, qCount: max, attempted, time, scaled: null,
+            accuracy, completion, band, mistakes, notes, createdAt,
+          });
+        } else {
+          const scaled = suggestScaled(raw, max);
+          DB.entries.push({
+            id: uid(), sittingId, date, testName, category, source, section: sec,
+            raw, maxRaw: max, qCount: max, attempted, time, scaled,
+            accuracy, completion, band: null, mistakes, notes, createdAt,
+          });
+        }
         created++;
       });
     } else {
       const section = document.getElementById("f_section").value;
-      const raw = parseFloat(document.getElementById("f_raw").value);
-      const maxRaw = parseFloat(document.getElementById("f_maxRaw").value);
-      const qCount = parseFloat(document.getElementById("f_qCount").value) || maxRaw;
-      const attemptedRaw = document.getElementById("f_attempted").value;
-      const attempted = attemptedRaw !== "" ? parseFloat(attemptedRaw) : qCount;
       const time = parseFloat(document.getElementById("f_time").value) || null;
-      let scaled = parseFloat(document.getElementById("f_scaled").value);
-      if (isNaN(scaled)) scaled = suggestScaled(raw, maxRaw);
-      const band = section === "SJT" ? (parseFloat(document.getElementById("f_band").value) || null) : null;
-      if (isNaN(raw) || isNaN(maxRaw) || maxRaw <= 0 || !scaled) {
-        alert("Please enter at least raw score, max raw mark, so a scaled score can be calculated (or enter scaled score directly).");
-        return;
+      const qCountRaw = document.getElementById("f_qCount").value;
+      const attemptedRaw = document.getElementById("f_attempted").value;
+
+      if (section === "SJT") {
+        const bandOnly = document.getElementById("f_sjtBandOnly").checked;
+        if (bandOnly) {
+          const band = parseInt(document.getElementById("f_bandManual").value, 10);
+          DB.entries.push({
+            id: uid(), sittingId: uid(), date, testName, category, source, section,
+            raw: null, maxRaw: null, qCount: null, attempted: null, time, scaled: null,
+            accuracy: null, completion: null, band, mistakes, notes, createdAt,
+          });
+          created++;
+        } else {
+          const raw = parseFloat(document.getElementById("f_raw").value);
+          const maxRaw = parseFloat(document.getElementById("f_maxRaw").value) || STANDARD_SECTION_INFO.SJT.maxRaw;
+          if (isNaN(raw) || !maxRaw) {
+            alert('Please enter a raw SJT score, or tick "I only have a Band".');
+            return;
+          }
+          const qCount = parseFloat(qCountRaw) || maxRaw;
+          const attempted = attemptedRaw !== "" ? parseFloat(attemptedRaw) : qCount;
+          const band = computeSjtBand(raw, maxRaw);
+          DB.entries.push({
+            id: uid(), sittingId: uid(), date, testName, category, source, section,
+            raw, maxRaw, qCount, attempted, time, scaled: null,
+            accuracy: (raw / maxRaw) * 100, completion: qCount ? (attempted / qCount) * 100 : null,
+            band, mistakes, notes, createdAt,
+          });
+          created++;
+        }
+      } else {
+        const raw = parseFloat(document.getElementById("f_raw").value);
+        const maxRaw = parseFloat(document.getElementById("f_maxRaw").value);
+        const qCount = parseFloat(qCountRaw) || maxRaw;
+        const attempted = attemptedRaw !== "" ? parseFloat(attemptedRaw) : qCount;
+        let scaled = parseFloat(document.getElementById("f_scaled").value);
+        if (isNaN(scaled)) scaled = suggestScaled(raw, maxRaw);
+        if (isNaN(raw) || isNaN(maxRaw) || maxRaw <= 0 || !scaled) {
+          alert("Please enter at least raw score, max raw mark, so a scaled score can be calculated (or enter scaled score directly).");
+          return;
+        }
+        DB.entries.push({
+          id: uid(), sittingId: uid(), date, testName, category, source, section,
+          raw, maxRaw, qCount, attempted, time, scaled,
+          accuracy: (raw / maxRaw) * 100, completion: qCount ? (attempted / qCount) * 100 : null,
+          band: null, mistakes, notes, createdAt,
+        });
+        created++;
       }
-      DB.entries.push({
-        id: uid(), sittingId: uid(), date, testName, category, source, section,
-        raw, maxRaw, qCount, attempted, time, scaled,
-        accuracy: (raw / maxRaw) * 100, completion: qCount ? (attempted / qCount) * 100 : null,
-        band, mistakes, notes, createdAt,
-      });
-      created++;
     }
 
     if (!created) { alert("No valid section scores were entered."); return; }
 
     if (source) DB.settings.lastSource = source;
+    DB.settings.lastCategory = category;
     save();
     document.getElementById("saveMsg").textContent = "Saved " + created + " entr" + (created === 1 ? "y" : "ies") + " ✓";
     setTimeout(() => (document.getElementById("saveMsg").textContent = ""), 3000);
     resetLogForm();
     refreshAllAfterDataChange();
+  }
+
+  // "Repeat last setup" — copies the most recent entry's category/source/section so
+  // the next attempt of the same kind is a couple of clicks away from saved.
+  function repeatLastSetup() {
+    const entries = allEntriesSorted();
+    if (!entries.length) return;
+    const last = entries[entries.length - 1];
+    document.getElementById("f_category").value = last.category;
+    document.getElementById("f_source").value = last.source || "";
+    multiManuallyToggled = false;
+    applyCategoryDefaults();
+    if (!document.getElementById("f_multiSection").checked) {
+      document.getElementById("f_section").value = last.section;
+      applySectionDefaults();
+    }
+    document.getElementById("f_testName").focus();
   }
 
   /* =========================================================================
@@ -1118,6 +1538,14 @@
         if (!confirm("Import will replace all current data in this browser. Continue?")) return;
         DB = parsed;
         if (!DB.targets) DB.targets = defaultData().targets;
+        if (DB.targets.SJT === undefined || DB.targets.SJT > 4) DB.targets.SJT = 2;
+        if (!DB.settings) DB.settings = defaultData().settings;
+        DB.entries.forEach((e) => {
+          if (e.section === "SJT") {
+            if (e.band === null || e.band === undefined) e.band = computeSjtBand(e.raw, e.maxRaw);
+            e.scaled = null;
+          }
+        });
         save();
         document.getElementById("dataMsg").textContent = "Import successful ✓";
         refreshAllAfterDataChange();
@@ -1156,6 +1584,9 @@
       btn.addEventListener("click", () => showPage(btn.dataset.page));
     });
     document.getElementById("quickAddBtn").addEventListener("click", () => showPage("log"));
+    document.getElementById("repeatLastBtn").addEventListener("click", () => { showPage("log"); repeatLastSetup(); });
+
+    renderBandRefTable(document.getElementById("bandRefTable"));
 
     // log form wiring — every field starts pre-filled with a sensible default;
     // manual edits are tracked so defaults never silently overwrite what the person typed.
@@ -1167,16 +1598,18 @@
     });
     document.getElementById("f_category").addEventListener("change", applyCategoryDefaults);
     document.getElementById("f_section").addEventListener("change", applySectionDefaults);
-    document.getElementById("f_raw").addEventListener("input", () => { updateScaledSuggestion(); updateAccuracyPreview(); });
+    document.getElementById("f_raw").addEventListener("input", () => { updateScaledSuggestion(); updateAccuracyPreview(); updateBandPreview(); });
     document.getElementById("f_maxRaw").addEventListener("input", () => {
       maxManuallyEdited = true;
       syncQuestionsInSet();
       updateScaledSuggestion();
       updateAccuracyPreview();
+      updateBandPreview();
     });
     document.getElementById("f_qCount").addEventListener("input", () => { qManuallyEdited = true; });
     document.getElementById("f_time").addEventListener("input", () => { timeManuallyEdited = true; });
     document.getElementById("f_scaled").addEventListener("input", () => (scaledManuallyEdited = true));
+    document.getElementById("f_sjtBandOnly").addEventListener("change", toggleSjtBandOnly);
     document.getElementById("logForm").addEventListener("submit", handleLogSubmit);
     resetLogForm();
 
@@ -1191,10 +1624,12 @@
 
     // targets
     document.getElementById("saveTargets").addEventListener("click", () => {
-      SECTIONS.forEach((s) => {
+      COGNITIVE_SECTIONS.forEach((s) => {
         const v = parseFloat(document.getElementById("t_" + s).value);
         if (!isNaN(v)) DB.targets[s] = clamp(round10(v), 300, 900);
       });
+      const sjtTarget = parseInt(document.getElementById("t_SJT").value, 10);
+      if (!isNaN(sjtTarget)) DB.targets.SJT = clamp(sjtTarget, 1, 4);
       save();
       document.getElementById("targetMsg").textContent = "Targets saved ✓";
       setTimeout(() => (document.getElementById("targetMsg").textContent = ""), 2500);

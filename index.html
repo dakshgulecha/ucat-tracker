@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>UCAT Score Tracker — Console</title>
-<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><rect width=%22100%22 height=%22100%22 rx=%2220%22 fill=%22%231B2430%22/><text x=%2250%22 y=%2266%22 font-size=%2255%22 text-anchor=%22middle%22 fill=%22%232DD4BF%22 font-family=%22Georgia%22>U</text></svg>">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><rect width=%22100%22 height=%22100%22 rx=%2220%22 fill=%22%23604D53%22/><text x=%2250%22 y=%2266%22 font-size=%2255%22 text-anchor=%22middle%22 fill=%22%23DB7F8E%22 font-family=%22Georgia%22>U</text></svg>">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
@@ -47,6 +47,7 @@
     </nav>
 
     <div class="sidebar-foot">
+      <button id="repeatLastBtn" class="btn-repeat">↻ Repeat last setup</button>
       <button id="quickAddBtn" class="btn-primary full">+ Quick log score</button>
     </div>
   </aside>
@@ -75,34 +76,36 @@
       <div class="grid-2">
         <div class="card">
           <div class="card-head">
-            <h3>Overall trend — all sections</h3>
-            <span class="card-sub">scaled score (300–900) over time</span>
+            <h3>Overall trend — QR · DM · VR</h3>
+            <span class="card-sub">scaled score (300–900) over time · SJT is band-based, see its own page</span>
           </div>
           <canvas id="chartOverallTrend" height="260"></canvas>
         </div>
         <div class="card">
           <div class="card-head">
             <h3>Strengths vs target</h3>
-            <span class="card-sub">latest section score vs your target</span>
+            <span class="card-sub">latest cognitive score vs your target (300–900 scale)</span>
           </div>
           <canvas id="chartRadar" height="260"></canvas>
+          <p class="card-note" id="radarSjtNote"></p>
         </div>
       </div>
 
       <div class="grid-2">
         <div class="card">
           <div class="card-head">
-            <h3>Section contribution per mock sitting</h3>
-            <span class="card-sub">stacked scaled score, most recent sittings</span>
+            <h3>Cognitive total per mock sitting</h3>
+            <span class="card-sub">stacked QR+DM+VR scaled score, out of 2700</span>
           </div>
           <canvas id="chartStacked" height="260"></canvas>
         </div>
         <div class="card">
           <div class="card-head">
             <h3>Medify vs UCAT Official</h3>
-            <span class="card-sub">average scaled score by platform</span>
+            <span class="card-sub">average cognitive scaled score by platform</span>
           </div>
           <canvas id="chartMedifyOfficial" height="260"></canvas>
+          <p class="card-note" id="medOffSjtNote"></p>
         </div>
       </div>
     </section>
@@ -150,6 +153,8 @@
             </label>
           </div>
 
+          <p class="callout" id="categoryInfo"></p>
+
           <div class="toggle-row">
             <label class="check">
               <input type="checkbox" id="f_multiSection">
@@ -181,20 +186,20 @@
               </label>
             </div>
             <div class="field-row">
-              <label class="form-field third">Scaled score (300–900)
+              <label class="form-field third" id="scaledWrap">Scaled score (300–900)
                 <input type="number" id="f_scaled" min="300" max="900" step="10" placeholder="auto-calculated">
                 <span class="field-note">auto from raw/max — override any time</span>
               </label>
               <label class="form-field third">Accuracy
                 <output id="f_accuracyPreview" class="readout">—</output>
               </label>
-              <label id="sjtBandWrap" class="form-field third hidden">SJT band (1–4, optional)
-                <input type="number" id="f_band" min="1" max="4" step="1">
+              <label id="sjtBandWrap" class="form-field third hidden">SJT band (auto)
+                <output id="f_bandPreview" class="readout band-readout">—</output>
               </label>
             </div>
 
-            <details class="advanced-fields" id="advancedFields">
-              <summary>+ Add more detail <span class="field-note inline">(completion, mistakes, notes — all optional)</span></summary>
+            <details class="advanced-fields" id="completionDetails">
+              <summary>+ Track completion <span class="field-note inline">(optional — only if you didn't finish all questions)</span></summary>
               <div class="advanced-inner">
                 <div class="field-row">
                   <label class="form-field">Questions in set
@@ -206,37 +211,65 @@
                     <span class="field-note">for completion rate — defaults to all</span>
                   </label>
                 </div>
-                <label class="form-field grow">Mistake categories
-                  <span class="field-note inline">(optional — helps spot patterns)</span>
-                  <div class="chip-row" id="mistakeChips">
-                    <label class="chip"><input type="checkbox" value="Misread question">Misread question</label>
-                    <label class="chip"><input type="checkbox" value="Timing pressure">Timing pressure</label>
-                    <label class="chip"><input type="checkbox" value="Calculation error">Calculation error</label>
-                    <label class="chip"><input type="checkbox" value="Careless slip">Careless slip</label>
-                    <label class="chip"><input type="checkbox" value="Content gap">Content gap</label>
-                    <label class="chip"><input type="checkbox" value="Guessed">Guessed</label>
-                    <label class="chip"><input type="checkbox" value="Second-guessed self">Second‑guessed self</label>
-                  </div>
-                </label>
-                <label class="form-field grow">Notes
-                  <textarea id="f_notes" rows="2" placeholder="What went well, what to fix next time..."></textarea>
-                </label>
+              </div>
+            </details>
+
+            <div id="sjtBandOnlyRow" class="field-row hidden">
+              <label class="check">
+                <input type="checkbox" id="f_sjtBandOnly">
+                I only have a Band, not a raw SJT score
+              </label>
+              <label class="form-field third hidden" id="sjtManualBandWrap">Band (1 = best, 4 = lowest)
+                <select id="f_bandManual">
+                  <option value="1">Band 1 — Excellent</option>
+                  <option value="2">Band 2 — Good</option>
+                  <option value="3">Band 3 — Modest</option>
+                  <option value="4">Band 4 — Low</option>
+                </select>
+              </label>
+            </div>
+
+            <details class="advanced-fields" id="bandRefDetails">
+              <summary>SJT band reference table</summary>
+              <div class="advanced-inner">
+                <table class="band-ref" id="bandRefTable"></table>
               </div>
             </details>
           </div>
 
           <!-- MULTI SECTION (FULL SITTING) ENTRY -->
           <div id="multiSectionBlock" class="hidden">
-            <p class="field-note inline">Raw, max and time default to the UCAT's standard section structure — only the raw scores need changing for a normal sitting.</p>
+            <p class="field-note inline">Raw, max and time default to the UCAT's standard section structure — only the raw scores need changing for a normal sitting. SJT is scored as a Band, not summed into your total.</p>
             <table class="mini-table" id="multiTable">
               <thead>
-                <tr><th>Section</th><th>Raw</th><th>Max raw</th><th>Time (min)</th><th>Scaled (auto)</th></tr>
+                <tr><th>Section</th><th>Raw</th><th>Max raw</th><th>Time (min)</th><th>Attempted (optional)</th><th>Result (auto)</th></tr>
               </thead>
               <tbody>
                 <!-- rows injected by JS -->
               </tbody>
             </table>
           </div>
+
+          <details class="advanced-fields" id="advancedFields">
+            <summary>+ Add more detail <span class="field-note inline">(notes &amp; mistakes — optional, applies to this whole entry/sitting)</span></summary>
+            <div class="advanced-inner">
+              <label class="form-field grow">Mistake categories
+                <span class="field-note inline">(optional — helps spot patterns)</span>
+                <div class="chip-row" id="mistakeChips">
+                  <label class="chip"><input type="checkbox" value="Misread question">Misread question</label>
+                  <label class="chip"><input type="checkbox" value="Timing pressure">Timing pressure</label>
+                  <label class="chip"><input type="checkbox" value="Calculation error">Calculation error</label>
+                  <label class="chip"><input type="checkbox" value="Careless slip">Careless slip</label>
+                  <label class="chip"><input type="checkbox" value="Content gap">Content gap</label>
+                  <label class="chip"><input type="checkbox" value="Guessed">Guessed</label>
+                  <label class="chip"><input type="checkbox" value="Second-guessed self">Second‑guessed self</label>
+                </div>
+              </label>
+              <label class="form-field grow">Notes
+                <textarea id="f_notes" rows="2" placeholder="What went well, what to fix next time..."></textarea>
+              </label>
+            </div>
+          </details>
 
           <div class="form-actions">
             <button type="submit" class="btn-primary">Save attempt</button>
@@ -280,7 +313,7 @@
             <thead>
               <tr>
                 <th>Date</th><th>Test</th><th>Type</th><th>Source</th><th>Section</th>
-                <th>Raw</th><th>Max</th><th>Scaled</th><th>Acc %</th><th>Time</th><th>Notes</th><th></th>
+                <th>Raw</th><th>Max</th><th>Result</th><th>Acc %</th><th>Time</th><th>Notes</th><th></th>
               </tr>
             </thead>
             <tbody id="entriesBody"></tbody>
@@ -300,19 +333,29 @@
       <div class="kpi-grid" id="fmKpis"></div>
       <div class="grid-2">
         <div class="card">
-          <div class="card-head"><h3>Overall mock performance</h3><span class="card-sub">total scaled score per sitting (sum of logged sections)</span></div>
+          <div class="card-head"><h3>Cognitive total per sitting</h3><span class="card-sub">QR+DM+VR scaled score, out of 2700 (sum of logged sections)</span></div>
           <canvas id="chartFmOverall" height="260"></canvas>
         </div>
         <div class="card">
-          <div class="card-head"><h3>Timed vs Untimed comparison</h3><span class="card-sub">average scaled score by section</span></div>
+          <div class="card-head"><h3>SJT band per sitting</h3><span class="card-sub">Band 1 (best) – Band 4 (lowest)</span></div>
+          <canvas id="chartFmSjtBand" height="260"></canvas>
+        </div>
+      </div>
+      <div class="grid-2">
+        <div class="card">
+          <div class="card-head"><h3>Timed vs Untimed comparison</h3><span class="card-sub">average scaled score by cognitive section</span></div>
           <canvas id="chartTimedUntimed" height="260"></canvas>
+        </div>
+        <div class="card">
+          <div class="card-head"><h3>SJT performance</h3><span class="card-sub">average raw mark and most common band</span></div>
+          <div id="sjtSummaryBlock" class="prediction-block"></div>
         </div>
       </div>
       <div class="card">
         <div class="card-head"><h3>Mock sittings log</h3></div>
         <div class="table-wrap">
           <table class="data-table" id="sittingsTable">
-            <thead><tr><th>Date</th><th>Test</th><th>Type</th><th>Source</th><th>QR</th><th>DM</th><th>VR</th><th>SJT</th><th>Total</th></tr></thead>
+            <thead><tr><th>Date</th><th>Test</th><th>Type</th><th>Source</th><th>QR</th><th>DM</th><th>VR</th><th>Cognitive total /2700</th><th>SJT band</th></tr></thead>
             <tbody id="sittingsBody"></tbody>
           </table>
         </div>
@@ -340,7 +383,7 @@
       <div class="card">
         <div class="table-wrap">
           <table class="data-table" id="miniTable">
-            <thead><tr><th>Date</th><th>Test</th><th>Source</th><th>Section</th><th>Raw</th><th>Scaled</th><th>Acc %</th><th>Time</th></tr></thead>
+            <thead><tr><th>Date</th><th>Test</th><th>Source</th><th>Section</th><th>Raw</th><th>Result</th><th>Acc %</th><th>Time</th></tr></thead>
             <tbody id="miniBody"></tbody>
           </table>
         </div>
@@ -419,11 +462,19 @@
         </div>
       </header>
       <div class="card form-card">
+        <p class="form-intro">QR, DM and VR targets are scaled scores (300–900 each — your cognitive total target is the sum, out of 2700). SJT has no scaled score: set the Band you're aiming for instead.</p>
         <div class="field-row">
           <label class="form-field">QR target <input type="number" id="t_QR" min="300" max="900" step="10"></label>
           <label class="form-field">DM target <input type="number" id="t_DM" min="300" max="900" step="10"></label>
           <label class="form-field">VR target <input type="number" id="t_VR" min="300" max="900" step="10"></label>
-          <label class="form-field">SJT target <input type="number" id="t_SJT" min="300" max="900" step="10"></label>
+          <label class="form-field">SJT target band
+            <select id="t_SJT">
+              <option value="1">Band 1 — Excellent</option>
+              <option value="2">Band 2 — Good</option>
+              <option value="3">Band 3 — Modest</option>
+              <option value="4">Band 4 — Low</option>
+            </select>
+          </label>
         </div>
         <div class="form-actions">
           <button class="btn-primary" id="saveTargets">Save targets</button>
@@ -439,6 +490,11 @@
       <div class="card">
         <div class="card-head"><h3>Predicted exam score</h3><span class="card-sub">weighted moving average of recent full-mock performance</span></div>
         <div id="predictionBlock" class="prediction-block"></div>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><h3>SJT band reference</h3><span class="card-sub">approximate thresholds, out of 69 raw marks — scaled proportionally for non-standard sets</span></div>
+        <table class="band-ref" id="bandRefTableTargets"></table>
       </div>
     </section>
 
