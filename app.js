@@ -127,30 +127,37 @@
     };
   }
 
+  // Shared fix-up logic for data loaded from anywhere (fresh localStorage read,
+  // or an imported backup file) — keeps both paths behaving identically.
+  function normalizeDB(parsed) {
+    if (!parsed || typeof parsed !== "object") return defaultData();
+    if (!parsed.entries) parsed.entries = [];
+    if (!parsed.targets) parsed.targets = defaultData().targets;
+    if (parsed.targets.SJT === undefined || parsed.targets.SJT > 4) parsed.targets.SJT = 2; // migrate old 300-900 SJT target
+    if (!parsed.settings) parsed.settings = defaultData().settings;
+    if (parsed.settings.lastCategory === undefined) parsed.settings.lastCategory = "Full Mock";
+    // Fix up any legacy SJT entries: no scaled score, band derived from raw if missing.
+    parsed.entries.forEach((e) => {
+      if (e.section === "SJT") {
+        if (e.band === null || e.band === undefined) e.band = computeSjtBand(e.raw, e.maxRaw);
+        e.scaled = null;
+      }
+    });
+    return parsed;
+  }
+
   function load() {
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
       let parsed;
       if (!raw) {
-        // try migrating from the old v1 key, fixing up SJT entries on the way in
+        // try migrating from the old v1 key
         const oldRaw = localStorage.getItem("ucatTrackerData_v1");
         parsed = oldRaw ? JSON.parse(oldRaw) : defaultData();
       } else {
         parsed = JSON.parse(raw);
       }
-      if (!parsed.entries) parsed.entries = [];
-      if (!parsed.targets) parsed.targets = defaultData().targets;
-      if (parsed.targets.SJT === undefined || parsed.targets.SJT > 4) parsed.targets.SJT = 2; // migrate old 300-900 SJT target
-      if (!parsed.settings) parsed.settings = defaultData().settings;
-      if (parsed.settings.lastCategory === undefined) parsed.settings.lastCategory = "Full Mock";
-      // Fix up any legacy SJT entries: no scaled score, band derived from raw if missing.
-      parsed.entries.forEach((e) => {
-        if (e.section === "SJT") {
-          if (e.band === null || e.band === undefined) e.band = computeSjtBand(e.raw, e.maxRaw);
-          e.scaled = null;
-        }
-      });
-      return parsed;
+      return normalizeDB(parsed);
     } catch (e) {
       console.error("Failed to load data, starting fresh.", e);
       return defaultData();
@@ -1260,28 +1267,36 @@
       const info = STANDARD_SECTION_INFO[sec];
       const row = document.createElement("tr");
       row.dataset.section = sec;
+      row.dataset.resultEdited = "false";
+      const resultCell = sec === "SJT"
+        ? "<select class='m_band'><option value=''>auto</option><option value='1'>Band 1</option><option value='2'>Band 2</option><option value='3'>Band 3</option><option value='4'>Band 4</option></select>"
+        : "<input type='number' class='m_scaled' min='300' max='900' step='10' placeholder='auto'>";
       row.innerHTML =
         "<td><span class='tag tag-" + sec.toLowerCase() + "'>" + sec + "</span></td>" +
-        "<td><input type='number' class='m_raw' min='0' placeholder='raw'></td>" +
-        "<td><input type='number' class='m_max' min='1' value='" + info.maxRaw + "'></td>" +
+        "<td><input type='number' class='m_raw' min='0' step='any' placeholder='raw'></td>" +
+        "<td><input type='number' class='m_max' min='1' step='any' value='" + info.maxRaw + "'></td>" +
         "<td><input type='number' class='m_time' min='0' value='" + info.time + "'></td>" +
         "<td><input type='number' class='m_attempted' min='0' placeholder='all'></td>" +
-        "<td><output class='m_scaled m_band_out'>—</output></td>";
+        "<td>" + resultCell + "</td>";
       tbody.appendChild(row);
       row.querySelector(".m_raw").addEventListener("input", () => updateMultiRowScaled(row, sec));
       row.querySelector(".m_max").addEventListener("input", () => updateMultiRowScaled(row, sec));
+      row.querySelector(sec === "SJT" ? ".m_band" : ".m_scaled").addEventListener("input", () => { row.dataset.resultEdited = "true"; });
+      row.querySelector(sec === "SJT" ? ".m_band" : ".m_scaled").addEventListener("change", () => { row.dataset.resultEdited = "true"; });
     });
   }
+  // Auto-fills the editable Result cell from the conversion algorithm — but only
+  // while the person hasn't typed/selected their own override for that row.
   function updateMultiRowScaled(row, sec) {
+    if (row.dataset.resultEdited === "true") return;
     const raw = parseFloat(row.querySelector(".m_raw").value);
     const max = parseFloat(row.querySelector(".m_max").value);
-    const out = row.querySelector(".m_scaled");
     if (sec === "SJT") {
       const band = computeSjtBand(raw, max);
-      out.textContent = band ? "Band " + band : "—";
+      row.querySelector(".m_band").value = band || "";
     } else {
       const s = suggestScaled(raw, max, sec);
-      out.textContent = s || "—";
+      row.querySelector(".m_scaled").value = s || "";
     }
   }
 
@@ -1460,14 +1475,16 @@
         const completion = max ? (attempted / max) * 100 : null;
         const accuracy = (raw / max) * 100;
         if (sec === "SJT") {
-          const band = computeSjtBand(raw, max);
+          const manualBand = parseInt(row.querySelector(".m_band").value, 10);
+          const band = !isNaN(manualBand) ? manualBand : computeSjtBand(raw, max);
           DB.entries.push({
             id: uid(), sittingId, date, testName, category, source, section: sec,
             raw, maxRaw: max, qCount: max, attempted, time, scaled: null,
             accuracy, completion, band, mistakes, notes, createdAt,
           });
         } else {
-          const scaled = suggestScaled(raw, max, sec);
+          const manualScaled = parseFloat(row.querySelector(".m_scaled").value);
+          const scaled = !isNaN(manualScaled) ? clamp(manualScaled, 300, 900) : suggestScaled(raw, max, sec);
           DB.entries.push({
             id: uid(), sittingId, date, testName, category, source, section: sec,
             raw, maxRaw: max, qCount: max, attempted, time, scaled,
@@ -1594,16 +1611,7 @@
         const parsed = JSON.parse(reader.result);
         if (!parsed.entries || !Array.isArray(parsed.entries)) throw new Error("Invalid file format");
         if (!confirm("Import will replace all current data in this browser. Continue?")) return;
-        DB = parsed;
-        if (!DB.targets) DB.targets = defaultData().targets;
-        if (DB.targets.SJT === undefined || DB.targets.SJT > 4) DB.targets.SJT = 2;
-        if (!DB.settings) DB.settings = defaultData().settings;
-        DB.entries.forEach((e) => {
-          if (e.section === "SJT") {
-            if (e.band === null || e.band === undefined) e.band = computeSjtBand(e.raw, e.maxRaw);
-            e.scaled = null;
-          }
-        });
+        DB = normalizeDB(parsed);
         save();
         document.getElementById("dataMsg").textContent = "Import successful ✓";
         refreshAllAfterDataChange();

@@ -303,6 +303,6 @@ input:focus, select:focus, textarea:focus{ border-color: var(--rose-deep); }
 .band-ref th{ text-align:left; font-family: var(--font-mono); font-size:10px; text-transform:uppercase; color:var(--ink-soft); padding:5px 8px; border-bottom:1px solid var(--line-strong); }
 .band-ref td{ padding:6px 8px; border-bottom:1px solid var(--line); }
 
-/* scrollbar */
+
 ::-webkit-scrollbar{ height:8px; width:8px; }
 ::-webkit-scrollbar-thumb{ background: var(--line-strong); border-radius:8px; }
