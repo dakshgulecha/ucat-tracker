@@ -1,0 +1,542 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>UCAT Score Tracker — Console</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><rect width=%22100%22 height=%22100%22 rx=%2220%22 fill=%22%23604D53%22/><text x=%2250%22 y=%2266%22 font-size=%2255%22 text-anchor=%22middle%22 fill=%22%23DB7F8E%22 font-family=%22Georgia%22>U</text></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div class="app">
+
+  <!-- ============ SIDEBAR ============ -->
+  <aside class="sidebar">
+    <div class="brand">
+      <span class="brand-mark">U</span>
+      <div class="brand-text">
+        <strong>UCAT Console</strong>
+        <small>score command center</small>
+      </div>
+    </div>
+
+    <nav class="nav">
+      <div class="nav-group-label">Overview</div>
+      <button class="nav-link active" data-page="dashboard">Dashboard</button>
+      <button class="nav-link" data-page="log">Log Attempt</button>
+      <button class="nav-link" data-page="entries">All Entries</button>
+
+      <div class="nav-group-label">Mock Tracking</div>
+      <button class="nav-link" data-page="fullmocks">Full Mocks</button>
+      <button class="nav-link" data-page="minimocks">Mini‑Mocks</button>
+      <button class="nav-link" data-page="practice">Practice Lab</button>
+
+      <div class="nav-group-label">Section Analytics</div>
+      <button class="nav-link tab-qr" data-page="QR">Quantitative Reasoning</button>
+      <button class="nav-link tab-dm" data-page="DM">Decision Making</button>
+      <button class="nav-link tab-vr" data-page="VR">Verbal Reasoning</button>
+      <button class="nav-link tab-sjt" data-page="SJT">Situational Judgement</button>
+
+      <div class="nav-group-label">Planning</div>
+      <button class="nav-link" data-page="targets">Targets &amp; Prediction</button>
+      <button class="nav-link" data-page="data">Data &amp; Backup</button>
+    </nav>
+
+    <div class="sidebar-foot">
+      <button id="repeatLastBtn" class="btn-repeat">↻ Repeat last setup</button>
+      <button id="quickAddBtn" class="btn-primary full">+ Quick log score</button>
+    </div>
+  </aside>
+
+  <!-- ============ MAIN ============ -->
+  <main class="main">
+
+    <!-- ===================== DASHBOARD ===================== -->
+    <section id="page-dashboard" class="page active">
+      <header class="page-head">
+        <div>
+          <p class="eyebrow">Result Slip — live, auto-updating</p>
+          <h1>Your UCAT Scorecard</h1>
+        </div>
+        <div class="head-meta" id="dashAsOf">No attempts logged yet</div>
+      </header>
+
+      <!-- Signature scorecard strip -->
+      <div class="scorecard" id="scorecard">
+        <!-- dials injected by JS -->
+      </div>
+
+      <!-- KPI grid -->
+      <div class="kpi-grid" id="kpiGrid"></div>
+
+      <div class="grid-2">
+        <div class="card">
+          <div class="card-head">
+            <h3>Overall trend — QR · DM · VR</h3>
+            <span class="card-sub">scaled score (300–900) over time · SJT is band-based, see its own page</span>
+          </div>
+          <canvas id="chartOverallTrend" height="260"></canvas>
+        </div>
+        <div class="card">
+          <div class="card-head">
+            <h3>Strengths vs target</h3>
+            <span class="card-sub">latest cognitive score vs your target (300–900 scale)</span>
+          </div>
+          <canvas id="chartRadar" height="260"></canvas>
+          <p class="card-note" id="radarSjtNote"></p>
+        </div>
+      </div>
+
+      <div class="grid-2">
+        <div class="card">
+          <div class="card-head">
+            <h3>Cognitive total per mock sitting</h3>
+            <span class="card-sub">stacked QR+DM+VR scaled score, out of 2700</span>
+          </div>
+          <canvas id="chartStacked" height="260"></canvas>
+        </div>
+        <div class="card">
+          <div class="card-head">
+            <h3>Medify vs UCAT Official</h3>
+            <span class="card-sub">average cognitive scaled score by platform</span>
+          </div>
+          <canvas id="chartMedifyOfficial" height="260"></canvas>
+          <p class="card-note" id="medOffSjtNote"></p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===================== LOG ATTEMPT ===================== -->
+    <section id="page-log" class="page">
+      <header class="page-head">
+        <div>
+          <p class="eyebrow">New entry</p>
+          <h1>Log an attempt</h1>
+        </div>
+      </header>
+
+      <div class="card form-card">
+        <p class="form-intro">Every field is pre-filled with a sensible default based on the UCAT's standard section structure and your last entry — just adjust whatever's different and save. Optional extras are tucked under "Add more detail".</p>
+        <form id="logForm">
+          <div class="field-row">
+            <label class="form-field">Date
+              <input type="date" id="f_date" required>
+            </label>
+            <label class="form-field grow-2">Test / mock name
+              <input type="text" id="f_testName" placeholder="e.g. Medify Mock 4" required>
+            </label>
+            <label class="form-field">Mock type
+              <select id="f_category" required>
+                <option value="Full Mock">Full Mock</option>
+                <option value="Medify Mock">Medify Mock</option>
+                <option value="UCAT Official Mock">UCAT Official Mock</option>
+                <option value="Mini-Mock">Mini‑Mock</option>
+                <option value="Timed Practice">Timed Practice</option>
+                <option value="Untimed Practice">Untimed Practice</option>
+              </select>
+            </label>
+            <label class="form-field">Source / platform
+              <input type="text" id="f_source" list="sourceList" placeholder="e.g. Medify">
+              <datalist id="sourceList">
+                <option value="Medify"></option>
+                <option value="UCAT Official Practice"></option>
+                <option value="Kaplan"></option>
+                <option value="MedEntry"></option>
+                <option value="6med"></option>
+                <option value="BlackStone Tutors"></option>
+                <option value="Other"></option>
+              </datalist>
+            </label>
+          </div>
+
+          <p class="callout" id="categoryInfo"></p>
+
+          <div class="toggle-row">
+            <label class="check">
+              <input type="checkbox" id="f_multiSection">
+              Log all four sections from this sitting at once
+              <span class="field-note inline">(auto-enabled for Full / Medify / Official mocks)</span>
+            </label>
+          </div>
+
+          <!-- SINGLE SECTION ENTRY -->
+          <div id="singleSectionBlock">
+            <div class="field-row">
+              <label class="form-field">Section
+                <select id="f_section">
+                  <option value="QR">Quantitative Reasoning</option>
+                  <option value="DM">Decision Making</option>
+                  <option value="VR">Verbal Reasoning</option>
+                  <option value="SJT">Situational Judgement</option>
+                </select>
+              </label>
+              <label class="form-field">Raw score
+                <input type="number" id="f_raw" min="0" step="1" placeholder="e.g. 27">
+              </label>
+              <label class="form-field">Max raw mark
+                <input type="number" id="f_maxRaw" min="1" step="1">
+                <span class="field-note">standard count, edit for non-standard sets</span>
+              </label>
+              <label class="form-field">Time taken (min)
+                <input type="number" id="f_time" min="0" step="1">
+              </label>
+            </div>
+            <div class="field-row">
+              <label class="form-field third" id="scaledWrap">Scaled score (300–900)
+                <input type="number" id="f_scaled" min="300" max="900" step="10" placeholder="auto-calculated">
+                <span class="field-note">auto from raw/max — override any time</span>
+              </label>
+              <label class="form-field third">Accuracy
+                <output id="f_accuracyPreview" class="readout">—</output>
+              </label>
+              <label id="sjtBandWrap" class="form-field third hidden">SJT band (auto)
+                <output id="f_bandPreview" class="readout band-readout">—</output>
+              </label>
+            </div>
+
+            <details class="advanced-fields" id="scoreRefDetails">
+              <summary>Scaled score conversion table <span class="field-note inline" id="scoreRefSectionLabel"></span></summary>
+              <div class="advanced-inner">
+                <p class="field-note">Estimates only — UCAT doesn't publish an exact curve; this mirrors commonly-cited prop-platform tables and the app's auto-calculated scaled score uses the same conversion.</p>
+                <table class="band-ref" id="scoreRefTable"></table>
+              </div>
+            </details>
+
+            <details class="advanced-fields" id="completionDetails">
+              <summary>+ Track completion <span class="field-note inline">(optional — only if you didn't finish all questions)</span></summary>
+              <div class="advanced-inner">
+                <div class="field-row">
+                  <label class="form-field">Questions in set
+                    <input type="number" id="f_qCount" min="1" step="1">
+                    <span class="field-note">defaults to max raw mark</span>
+                  </label>
+                  <label class="form-field">Questions attempted
+                    <input type="number" id="f_attempted" min="0" step="1">
+                    <span class="field-note">for completion rate — defaults to all</span>
+                  </label>
+                </div>
+              </div>
+            </details>
+
+            <div id="sjtBandOnlyRow" class="field-row hidden">
+              <label class="check">
+                <input type="checkbox" id="f_sjtBandOnly">
+                I only have a Band, not a raw SJT score
+              </label>
+              <label class="form-field third hidden" id="sjtManualBandWrap">Band (1 = best, 4 = lowest)
+                <select id="f_bandManual">
+                  <option value="1">Band 1 — Excellent</option>
+                  <option value="2">Band 2 — Good</option>
+                  <option value="3">Band 3 — Modest</option>
+                  <option value="4">Band 4 — Low</option>
+                </select>
+              </label>
+            </div>
+
+            <details class="advanced-fields" id="bandRefDetails">
+              <summary>SJT band reference table</summary>
+              <div class="advanced-inner">
+                <table class="band-ref" id="bandRefTable"></table>
+              </div>
+            </details>
+          </div>
+
+          <!-- MULTI SECTION (FULL SITTING) ENTRY -->
+          <div id="multiSectionBlock" class="hidden">
+            <p class="field-note inline">Raw, max and time default to the UCAT's standard section structure — only the raw scores need changing for a normal sitting. SJT is scored as a Band, not summed into your total.</p>
+            <table class="mini-table" id="multiTable">
+              <thead>
+                <tr><th>Section</th><th>Raw</th><th>Max raw</th><th>Time (min)</th><th>Attempted (optional)</th><th>Result (auto)</th></tr>
+              </thead>
+              <tbody>
+                <!-- rows injected by JS -->
+              </tbody>
+            </table>
+          </div>
+
+          <details class="advanced-fields" id="advancedFields">
+            <summary>+ Add more detail <span class="field-note inline">(notes &amp; mistakes — optional, applies to this whole entry/sitting)</span></summary>
+            <div class="advanced-inner">
+              <label class="form-field grow">Mistake categories
+                <span class="field-note inline">(optional — helps spot patterns)</span>
+                <div class="chip-row" id="mistakeChips">
+                  <label class="chip"><input type="checkbox" value="Misread question">Misread question</label>
+                  <label class="chip"><input type="checkbox" value="Timing pressure">Timing pressure</label>
+                  <label class="chip"><input type="checkbox" value="Calculation error">Calculation error</label>
+                  <label class="chip"><input type="checkbox" value="Careless slip">Careless slip</label>
+                  <label class="chip"><input type="checkbox" value="Content gap">Content gap</label>
+                  <label class="chip"><input type="checkbox" value="Guessed">Guessed</label>
+                  <label class="chip"><input type="checkbox" value="Second-guessed self">Second‑guessed self</label>
+                </div>
+              </label>
+              <label class="form-field grow">Notes
+                <textarea id="f_notes" rows="2" placeholder="What went well, what to fix next time..."></textarea>
+              </label>
+            </div>
+          </details>
+
+          <div class="form-actions">
+            <button type="submit" class="btn-primary">Save attempt</button>
+            <span id="saveMsg" class="save-msg"></span>
+          </div>
+        </form>
+      </div>
+    </section>
+
+    <!-- ===================== ALL ENTRIES ===================== -->
+    <section id="page-entries" class="page">
+      <header class="page-head">
+        <div>
+          <p class="eyebrow">Full log</p>
+          <h1>All Entries</h1>
+        </div>
+      </header>
+
+      <div class="card filter-bar">
+        <label>Section
+          <select id="filt_section"><option value="">All</option><option value="QR">QR</option><option value="DM">DM</option><option value="VR">VR</option><option value="SJT">SJT</option></select>
+        </label>
+        <label>Mock type
+          <select id="filt_category"><option value="">All</option></select>
+        </label>
+        <label>Source
+          <select id="filt_source"><option value="">All</option></select>
+        </label>
+        <label>From
+          <input type="date" id="filt_from">
+        </label>
+        <label>To
+          <input type="date" id="filt_to">
+        </label>
+        <button class="btn-ghost" id="filt_clear">Clear filters</button>
+      </div>
+
+      <div class="card">
+        <div class="table-wrap">
+          <table class="data-table" id="entriesTable">
+            <thead>
+              <tr>
+                <th>Date</th><th>Test</th><th>Type</th><th>Source</th><th>Section</th>
+                <th>Raw</th><th>Max</th><th>Result</th><th>Acc %</th><th>Time</th><th>Notes</th><th></th>
+              </tr>
+            </thead>
+            <tbody id="entriesBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===================== FULL MOCKS ===================== -->
+    <section id="page-fullmocks" class="page">
+      <header class="page-head">
+        <div>
+          <p class="eyebrow">Mock sittings</p>
+          <h1>Full Mocks Overview</h1>
+        </div>
+      </header>
+      <div class="kpi-grid" id="fmKpis"></div>
+      <div class="grid-2">
+        <div class="card">
+          <div class="card-head"><h3>Cognitive total per sitting</h3><span class="card-sub">QR+DM+VR scaled score, out of 2700 (sum of logged sections)</span></div>
+          <canvas id="chartFmOverall" height="260"></canvas>
+        </div>
+        <div class="card">
+          <div class="card-head"><h3>SJT band per sitting</h3><span class="card-sub">Band 1 (best) – Band 4 (lowest)</span></div>
+          <canvas id="chartFmSjtBand" height="260"></canvas>
+        </div>
+      </div>
+      <div class="grid-2">
+        <div class="card">
+          <div class="card-head"><h3>Timed vs Untimed comparison</h3><span class="card-sub">average scaled score by cognitive section</span></div>
+          <canvas id="chartTimedUntimed" height="260"></canvas>
+        </div>
+        <div class="card">
+          <div class="card-head"><h3>SJT performance</h3><span class="card-sub">average raw mark and most common band</span></div>
+          <div id="sjtSummaryBlock" class="prediction-block"></div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-head"><h3>Mock sittings log</h3></div>
+        <div class="table-wrap">
+          <table class="data-table" id="sittingsTable">
+            <thead><tr><th>Date</th><th>Test</th><th>Type</th><th>Source</th><th>QR</th><th>DM</th><th>VR</th><th>Cognitive total /2700</th><th>SJT band</th></tr></thead>
+            <tbody id="sittingsBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===================== MINI MOCKS ===================== -->
+    <section id="page-minimocks" class="page">
+      <header class="page-head">
+        <div>
+          <p class="eyebrow">Section sprints</p>
+          <h1>Mini‑Mocks</h1>
+        </div>
+      </header>
+      <div class="grid-2">
+        <div class="card">
+          <div class="card-head"><h3>Mini‑mock trend by section</h3><span class="card-sub">QR · DM · VR only — SJT is band-based, see note below</span></div>
+          <canvas id="chartMiniTrend" height="260"></canvas>
+        </div>
+        <div class="card">
+          <div class="card-head"><h3>Mini‑mock section averages</h3></div>
+          <canvas id="chartMiniAvg" height="260"></canvas>
+          <p class="card-note" id="miniSjtNote"></p>
+        </div>
+      </div>
+      <div class="card">
+        <div class="table-wrap">
+          <table class="data-table" id="miniTable">
+            <thead><tr><th>Date</th><th>Test</th><th>Source</th><th>Section</th><th>Raw</th><th>Result</th><th>Acc %</th><th>Time</th></tr></thead>
+            <tbody id="miniBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===================== PRACTICE LAB ===================== -->
+    <section id="page-practice" class="page">
+      <header class="page-head">
+        <div>
+          <p class="eyebrow">Why marks are lost, not just what they are</p>
+          <h1>Practice Lab</h1>
+        </div>
+      </header>
+      <div class="grid-2">
+        <div class="card">
+          <div class="card-head"><h3>Accuracy trend</h3><span class="card-sub">timed &amp; untimed practice</span></div>
+          <canvas id="chartAccuracyTrend" height="240"></canvas>
+        </div>
+        <div class="card">
+          <div class="card-head"><h3>Completion rate trend</h3><span class="card-sub">% of questions attempted</span></div>
+          <canvas id="chartCompletionTrend" height="240"></canvas>
+        </div>
+      </div>
+      <div class="grid-2">
+        <div class="card">
+          <div class="card-head"><h3>Timing trend</h3><span class="card-sub">avg seconds per question</span></div>
+          <canvas id="chartTimingTrend" height="240"></canvas>
+        </div>
+        <div class="card">
+          <div class="card-head"><h3>Mistake categories</h3><span class="card-sub">frequency across logged attempts</span></div>
+          <canvas id="chartMistakes" height="240"></canvas>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===================== SECTION TEMPLATE (QR/DM/VR/SJT) ===================== -->
+    <template id="sectionPageTemplate">
+      <section class="page">
+        <header class="page-head">
+          <div>
+            <p class="eyebrow sec-eyebrow"></p>
+            <h1 class="sec-title"></h1>
+          </div>
+        </header>
+        <div class="kpi-grid sec-kpis"></div>
+        <div class="grid-2">
+          <div class="card">
+            <div class="card-head"><h3>Score trend over time</h3><span class="card-sub">scaled score with rolling average</span></div>
+            <canvas class="chart-trend" height="250"></canvas>
+          </div>
+          <div class="card">
+            <div class="card-head"><h3>Score distribution</h3></div>
+            <canvas class="chart-dist" height="250"></canvas>
+          </div>
+        </div>
+        <div class="grid-2">
+          <div class="card">
+            <div class="card-head"><h3>Recent performance</h3><span class="card-sub">last 8 attempts</span></div>
+            <canvas class="chart-recent" height="250"></canvas>
+          </div>
+          <div class="card">
+            <div class="card-head"><h3>Deeper stats</h3></div>
+            <div class="stat-list sec-stats"></div>
+          </div>
+        </div>
+      </section>
+    </template>
+
+    <!-- ===================== TARGETS ===================== -->
+    <section id="page-targets" class="page">
+      <header class="page-head">
+        <div>
+          <p class="eyebrow">Where you're going</p>
+          <h1>Targets &amp; Prediction</h1>
+        </div>
+      </header>
+      <div class="card form-card">
+        <p class="form-intro">QR, DM and VR targets are scaled scores (300–900 each — your cognitive total target is the sum, out of 2700). SJT has no scaled score: set the Band you're aiming for instead.</p>
+        <div class="field-row">
+          <label class="form-field">QR target <input type="number" id="t_QR" min="300" max="900" step="10"></label>
+          <label class="form-field">DM target <input type="number" id="t_DM" min="300" max="900" step="10"></label>
+          <label class="form-field">VR target <input type="number" id="t_VR" min="300" max="900" step="10"></label>
+          <label class="form-field">SJT target band
+            <select id="t_SJT">
+              <option value="1">Band 1 — Excellent</option>
+              <option value="2">Band 2 — Good</option>
+              <option value="3">Band 3 — Modest</option>
+              <option value="4">Band 4 — Low</option>
+            </select>
+          </label>
+        </div>
+        <div class="form-actions">
+          <button class="btn-primary" id="saveTargets">Save targets</button>
+          <span id="targetMsg" class="save-msg"></span>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><h3>Progress to target</h3></div>
+        <div id="progressBars" class="progress-list"></div>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><h3>Predicted exam score</h3><span class="card-sub">weighted moving average of recent full-mock performance</span></div>
+        <div id="predictionBlock" class="prediction-block"></div>
+      </div>
+
+      <div class="card">
+        <div class="card-head"><h3>SJT band reference</h3><span class="card-sub">approximate thresholds, out of 69 raw marks — scaled proportionally for non-standard sets</span></div>
+        <table class="band-ref" id="bandRefTableTargets"></table>
+      </div>
+    </section>
+
+    <!-- ===================== DATA & BACKUP ===================== -->
+    <section id="page-data" class="page">
+      <header class="page-head">
+        <div>
+          <p class="eyebrow">Your data, your machine</p>
+          <h1>Data &amp; Backup</h1>
+        </div>
+      </header>
+      <div class="card">
+        <p>Everything is stored locally in this browser's storage — nothing leaves your device. Export a backup regularly, especially before clearing browser data or switching devices/browsers.</p>
+        <div class="form-actions">
+          <button class="btn-primary" id="exportBtn">Export backup (.json)</button>
+          <button class="btn-ghost" id="exportCsvBtn">Export entries (.csv)</button>
+          <label class="btn-ghost file-btn">Import backup
+            <input type="file" id="importInput" accept="application/json" hidden>
+          </label>
+          <button class="btn-danger" id="resetBtn">Erase all data</button>
+        </div>
+        <p id="dataMsg" class="save-msg"></p>
+      </div>
+      <div class="card">
+        <div class="card-head"><h3>Storage status</h3></div>
+        <p id="storageStatus" class="card-sub"></p>
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
