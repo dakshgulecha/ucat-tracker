@@ -109,8 +109,8 @@ input, select, textarea{ font-family: var(--font-body); }
 .nav-link:hover{ background: rgba(255,255,255,0.08); color:#fff; }
 .nav-link.active{ background: rgba(255,255,255,0.16); color:#fff; font-weight:600; }
 .nav-link.tab-qr::before{ content:""; width:8px;height:8px;border-radius:50%; background:var(--qr); flex-shrink:0;}
-.nav-link.tab-dm::before{ content:""; width:8px;height:8px;border-radius:50%; background:var(--steel); flex-shrink:0;}
-.nav-link.tab-vr::before{ content:""; width:8px;height:8px;border-radius:50%; background:var(--vr-soft); flex-shrink:0;}
+.nav-link.tab-dm::before{ content:""; width:8px;height:8px;border-radius:50%; background:var(--dm); flex-shrink:0;}
+.nav-link.tab-vr::before{ content:""; width:8px;height:8px;border-radius:50%; background:var(--vr); flex-shrink:0;}
 .nav-link.tab-sjt::before{ content:""; width:8px;height:8px;border-radius:50%; background:var(--sjt); flex-shrink:0;}
 
 .sidebar-foot{ padding-top: 12px; border-top: 1px solid rgba(255,255,255,0.12); display:flex; flex-direction:column; gap:8px;}
@@ -258,9 +258,9 @@ input:focus, select:focus, textarea:focus{ border-color: var(--rose-deep); }
 .form-actions{ display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
 .btn-primary{ background: var(--rose-deep); color:#fff; border:none; padding:10px 18px; border-radius:8px; font-weight:600; font-size:13.5px; }
 .btn-primary:hover{ background: var(--taupe); }
-.btn-ghost{ background:transparent; border:1px solid var(--line-strong); padding:9px 16px; border-radius:8px; font-weight:600; font-size:13px; color:var(--ink); }
+.btn-ghost{ background:transparent; border:1px solid var(--line-strong); padding:10px 18px; border-radius:8px; font-weight:600; font-size:13.5px; color:var(--ink); }
 .btn-ghost:hover{ background:#fff; }
-.btn-danger{ background: var(--bad-bg); color:var(--bad); border:1px solid #e8bdb9; padding:9px 16px; border-radius:8px; font-weight:600; font-size:13px;}
+.btn-danger{ background: var(--bad-bg); color:var(--bad); border:1px solid #e8bdb9; padding:10px 18px; border-radius:8px; font-weight:600; font-size:13.5px;}
 .file-btn{ display:inline-flex; align-items:center; }
 .save-msg{ font-family: var(--font-mono); font-size:12px; color: var(--good); }
 

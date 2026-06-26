@@ -165,6 +165,20 @@
 
           <!-- SINGLE SECTION ENTRY -->
           <div id="singleSectionBlock">
+            <div id="sjtBandOnlyRow" class="field-row hidden">
+              <label class="check">
+                <input type="checkbox" id="f_sjtBandOnly">
+                I only have a Band, not a raw SJT score
+              </label>
+              <label class="form-field third hidden" id="sjtManualBandWrap">Band (1 = best, 4 = lowest)
+                <select id="f_bandManual">
+                  <option value="1">Band 1 — Excellent</option>
+                  <option value="2">Band 2 — Good</option>
+                  <option value="3">Band 3 — Modest</option>
+                  <option value="4">Band 4 — Low</option>
+                </select>
+              </label>
+            </div>
             <div class="field-row">
               <label class="form-field">Section
                 <select id="f_section">
@@ -222,21 +236,6 @@
                 </div>
               </div>
             </details>
-
-            <div id="sjtBandOnlyRow" class="field-row hidden">
-              <label class="check">
-                <input type="checkbox" id="f_sjtBandOnly">
-                I only have a Band, not a raw SJT score
-              </label>
-              <label class="form-field third hidden" id="sjtManualBandWrap">Band (1 = best, 4 = lowest)
-                <select id="f_bandManual">
-                  <option value="1">Band 1 — Excellent</option>
-                  <option value="2">Band 2 — Good</option>
-                  <option value="3">Band 3 — Modest</option>
-                  <option value="4">Band 4 — Low</option>
-                </select>
-              </label>
-            </div>
 
             <details class="advanced-fields" id="bandRefDetails">
               <summary>SJT band reference table</summary>

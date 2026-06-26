@@ -332,6 +332,29 @@
     return mean(arr);
   }
 
+  /* --------------------- DATE-ALIGNED CATEGORY AXIS HELPERS ---------------------
+     Chart.js's "time" scale requires a date adapter (date-fns/luxon/moment) to
+     work — this project deliberately doesn't load one (no extra CDN dependency
+     for a local-only tool). Multi-section line charts instead share one sorted,
+     deduplicated list of date strings as plain category labels, and each
+     section's series is null-filled to align with it index-for-index. Chart.js
+     skips nulls and (with spanGaps) draws straight through them, so each line
+     still reads as a continuous trend even though sections were logged on
+     different dates.                                                          */
+  function buildDateLabels(entriesList) {
+    const set = new Set();
+    entriesList.forEach((e) => set.add(e.date));
+    return [...set].sort();
+  }
+  function seriesAlignedToLabels(entries, labels, valueFn) {
+    const byDate = {};
+    entries.forEach((e) => { byDate[e.date] = valueFn(e); }); // entries are date-sorted, so same-date dupes keep the latest
+    return labels.map((d) => (Object.prototype.hasOwnProperty.call(byDate, d) ? byDate[d] : null));
+  }
+  function dateAxisOptions() {
+    return { ticks: { callback: function (value) { return fmtDate(this.getLabelForValue(value)); } } };
+  }
+
   /* ------------------------------ CHART REGISTRY ------------------------- */
   const charts = {};
   function makeChart(canvas, config) {
@@ -587,26 +610,25 @@
 
   function renderOverallTrendChart() {
     const canvas = document.getElementById("chartOverallTrend");
-    const datasets = COGNITIVE_SECTIONS.map((sec) => {
-      const arr = bySection(sec);
-      return {
-        label: sec,
-        data: arr.map((e) => ({ x: e.date, y: e.scaled })),
-        borderColor: SECTION_COLORS[sec],
-        backgroundColor: SECTION_COLORS[sec],
-        tension: 0.3,
-        spanGaps: true,
-        pointRadius: 3,
-      };
-    });
-    if (!datasets.some((d) => d.data.length)) { emptyState(canvas); return; }
+    const allCognitive = COGNITIVE_SECTIONS.flatMap((sec) => bySection(sec));
+    if (!allCognitive.length) { emptyState(canvas); return; }
+    const labels = buildDateLabels(allCognitive);
+    const datasets = COGNITIVE_SECTIONS.map((sec) => ({
+      label: sec,
+      data: seriesAlignedToLabels(bySection(sec), labels, (e) => e.scaled),
+      borderColor: SECTION_COLORS[sec],
+      backgroundColor: SECTION_COLORS[sec],
+      tension: 0.3,
+      spanGaps: true,
+      pointRadius: 3,
+    }));
     makeChart(canvas, {
       type: "line",
-      data: { datasets },
+      data: { labels, datasets },
       options: {
         responsive: true,
         scales: {
-          x: { type: "time", time: { unit: "week" }, title: { display: false } },
+          x: dateAxisOptions(),
           y: { min: 300, max: 900, title: { display: true, text: "Scaled score" } },
         },
         plugins: { legend: { position: "bottom" } },
@@ -987,19 +1009,21 @@
     }
     const cognitive = entries.filter((e) => e.section !== "SJT");
     if (cognitive.length) {
+      const labels = buildDateLabels(cognitive);
       makeChart(trendCanvas, {
         type: "line",
         data: {
+          labels,
           datasets: COGNITIVE_SECTIONS.map((sec) => ({
             label: sec,
-            data: entries.filter((e) => e.section === sec).map((e) => ({ x: e.date, y: e.scaled })),
+            data: seriesAlignedToLabels(entries.filter((e) => e.section === sec), labels, (e) => e.scaled),
             borderColor: SECTION_COLORS[sec],
             backgroundColor: SECTION_COLORS[sec],
             tension: 0.25,
             spanGaps: true,
           })),
         },
-        options: { scales: { x: { type: "time", time: { unit: "week" } }, y: { min: 300, max: 900 } }, plugins: { legend: { position: "bottom" } } },
+        options: { scales: { x: dateAxisOptions(), y: { min: 300, max: 900 } }, plugins: { legend: { position: "bottom" } } },
       });
       makeChart(avgCanvas, {
         type: "bar",
@@ -1042,50 +1066,59 @@
       return;
     }
 
+    const labels = buildDateLabels(practiceEntries);
+
     makeChart(accCanvas, {
       type: "line",
       data: {
+        labels,
         datasets: SECTIONS.map((sec) => ({
           label: sec,
-          data: practiceEntries.filter((e) => e.section === sec).map((e) => ({ x: e.date, y: e.accuracy })),
+          data: seriesAlignedToLabels(practiceEntries.filter((e) => e.section === sec), labels, (e) => e.accuracy),
           borderColor: SECTION_COLORS[sec], backgroundColor: SECTION_COLORS[sec], tension: 0.25, spanGaps: true,
         })),
       },
-      options: { scales: { x: { type: "time", time: { unit: "week" } }, y: { min: 0, max: 100, title: { display: true, text: "Raw mark %" } } }, plugins: { legend: { position: "bottom" } } },
+      options: { scales: { x: dateAxisOptions(), y: { min: 0, max: 100, title: { display: true, text: "Raw mark %" } } }, plugins: { legend: { position: "bottom" } } },
     });
 
     makeChart(compCanvas, {
       type: "line",
       data: {
+        labels,
         datasets: SECTIONS.map((sec) => ({
           label: sec,
-          data: practiceEntries.filter((e) => e.section === sec && e.completion !== null).map((e) => ({ x: e.date, y: e.completion })),
+          data: seriesAlignedToLabels(practiceEntries.filter((e) => e.section === sec && e.completion !== null), labels, (e) => e.completion),
           borderColor: SECTION_COLORS[sec], backgroundColor: SECTION_COLORS[sec], tension: 0.25, spanGaps: true,
         })),
       },
-      options: { scales: { x: { type: "time", time: { unit: "week" } }, y: { min: 0, max: 100, title: { display: true, text: "Completion %" } } }, plugins: { legend: { position: "bottom" } } },
+      options: { scales: { x: dateAxisOptions(), y: { min: 0, max: 100, title: { display: true, text: "Completion %" } } }, plugins: { legend: { position: "bottom" } } },
     });
 
     makeChart(timeCanvas, {
       type: "line",
       data: {
+        labels,
         datasets: SECTIONS.map((sec) => ({
           label: sec,
-          data: practiceEntries.filter((e) => e.section === sec && e.time && e.qCount).map((e) => ({ x: e.date, y: Math.round((e.time * 60) / e.qCount) })),
+          data: seriesAlignedToLabels(practiceEntries.filter((e) => e.section === sec && e.time && e.qCount), labels, (e) => Math.round((e.time * 60) / e.qCount)),
           borderColor: SECTION_COLORS[sec], backgroundColor: SECTION_COLORS[sec], tension: 0.25, spanGaps: true,
         })),
       },
-      options: { scales: { x: { type: "time", time: { unit: "week" } }, y: { title: { display: true, text: "Seconds / question" } } }, plugins: { legend: { position: "bottom" } } },
+      options: { scales: { x: dateAxisOptions(), y: { title: { display: true, text: "Seconds / question" } } }, plugins: { legend: { position: "bottom" } } },
     });
 
     const mistakeCounts = {};
     practiceEntries.forEach((e) => (e.mistakes || []).forEach((m) => { mistakeCounts[m] = (mistakeCounts[m] || 0) + 1; }));
-    const labels = Object.keys(mistakeCounts);
-    makeChart(mistakeCanvas, {
-      type: "bar",
-      data: { labels, datasets: [{ label: "Times logged", data: labels.map((l) => mistakeCounts[l]), backgroundColor: "#604D53" }] },
-      options: { indexAxis: "y", plugins: { legend: { display: false } } },
-    });
+    const mistakeLabels = Object.keys(mistakeCounts);
+    if (mistakeLabels.length) {
+      makeChart(mistakeCanvas, {
+        type: "bar",
+        data: { labels: mistakeLabels, datasets: [{ label: "Times logged", data: mistakeLabels.map((l) => mistakeCounts[l]), backgroundColor: "#604D53" }] },
+        options: { indexAxis: "y", plugins: { legend: { display: false } } },
+      });
+    } else {
+      emptyState(mistakeCanvas);
+    }
   }
 
   /* =========================================================================
