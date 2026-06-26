@@ -198,6 +198,7 @@ input, select, textarea{ font-family: var(--font-body); }
 
 /* ===================== FORM ===================== */
 .form-card form{ display:flex; flex-direction:column; gap:16px; }
+#singleSectionBlock{ display:flex; flex-direction:column; gap:16px; }
 .form-intro{ font-family: var(--font-mono); font-size:11.5px; background: var(--rose-tint); border:1px dashed var(--slate-strong); border-radius:8px; padding:8px 10px; margin:0 0 4px; color:var(--taupe); }
 .field-row{ display:flex; gap:14px; flex-wrap:wrap; align-items:flex-start; }
 
@@ -205,6 +206,7 @@ input, select, textarea{ font-family: var(--font-body); }
   font-family: var(--font-mono); font-size:11.5px; color:var(--taupe);
   background: var(--terracotta-tint); border:1px solid #DCB8BC; border-radius:8px; padding:8px 10px; margin:0;
 }
+.callout:empty{ display:none; }
 
 /* explicit class instead of tag+ancestor selectors so nested labels (e.g. chips) are never affected */
 .form-field{
@@ -277,6 +279,9 @@ input:focus, select:focus, textarea:focus{ border-color: var(--rose-deep); }
 .tag-dm{ background:var(--dm-soft); color:var(--dm); }
 .tag-vr{ background:var(--vr-soft); color:var(--vr); }
 .tag-sjt{ background:var(--sjt-soft); color:var(--sjt); }
+.entry-actions{ display:flex; gap:8px; white-space:nowrap; }
+.edit-btn{ background:none; border:1px solid var(--line-strong); color:var(--taupe-deep); font-size:12px; font-weight:600; padding:4px 10px; border-radius:14px; }
+.edit-btn:hover{ background:#fff; border-color:var(--rose-deep); color:var(--rose-deep); }
 .del-btn{ background:none; border:none; color:var(--bad); font-size:13px; }
 
 /* ===================== STATS LIST ===================== */

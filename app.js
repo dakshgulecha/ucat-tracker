@@ -1261,12 +1261,16 @@
         "<td>" + (e.accuracy !== null && e.accuracy !== undefined ? fmt0(e.accuracy) + "%" : "—") + "</td>" +
         "<td>" + (e.time || "—") + "m</td>" +
         "<td>" + esc((e.notes || "").slice(0, 40)) + "</td>" +
-        "<td><button class='del-btn' data-del='" + e.id + "'>Delete</button></td>" +
+        "<td class='entry-actions'><button class='edit-btn' data-edit='" + e.id + "'>Edit</button><button class='del-btn' data-del='" + e.id + "'>Delete</button></td>" +
         "</tr>";
+    });
+    body.querySelectorAll("[data-edit]").forEach((btn) => {
+      btn.addEventListener("click", () => startEditEntry(btn.dataset.edit));
     });
     body.querySelectorAll("[data-del]").forEach((btn) => {
       btn.addEventListener("click", () => {
         if (!confirm("Delete this entry? This cannot be undone.")) return;
+        if (editingEntryId === btn.dataset.del) exitEditMode();
         DB.entries = DB.entries.filter((x) => x.id !== btn.dataset.del);
         save();
         renderEntriesPage();
@@ -1292,6 +1296,7 @@
   let timeManuallyEdited = false;
   let multiManuallyToggled = false;
   let lastAutoTestName = "";
+  let editingEntryId = null;
 
   function buildMultiTable() {
     const tbody = document.querySelector("#multiTable tbody");
@@ -1480,6 +1485,56 @@
     out.innerHTML = band ? '<span class="band-pill b' + band + '">Band ' + band + "</span> " + SJT_BAND_INFO[band].label : "—";
   }
 
+  // Builds the data for a single (non-multi) section entry from the current form
+  // fields. Returns null (and shows an alert) if the form isn't validly filled in.
+  // Shared by both "create new entry" and "update existing entry" flows so the
+  // two stay in sync.
+  function buildSingleSectionEntryData() {
+    const section = document.getElementById("f_section").value;
+    const time = parseFloat(document.getElementById("f_time").value) || null;
+    const qCountRaw = document.getElementById("f_qCount").value;
+    const attemptedRaw = document.getElementById("f_attempted").value;
+
+    if (section === "SJT") {
+      const bandOnly = document.getElementById("f_sjtBandOnly").checked;
+      if (bandOnly) {
+        const band = parseInt(document.getElementById("f_bandManual").value, 10);
+        return {
+          section, raw: null, maxRaw: null, qCount: null, attempted: null, time, scaled: null,
+          accuracy: null, completion: null, band,
+        };
+      }
+      const raw = parseFloat(document.getElementById("f_raw").value);
+      const maxRaw = parseFloat(document.getElementById("f_maxRaw").value) || STANDARD_SECTION_INFO.SJT.maxRaw;
+      if (isNaN(raw) || !maxRaw) {
+        alert('Please enter a raw SJT score, or tick "I only have a Band".');
+        return null;
+      }
+      const qCount = parseFloat(qCountRaw) || maxRaw;
+      const attempted = attemptedRaw !== "" ? parseFloat(attemptedRaw) : qCount;
+      const band = computeSjtBand(raw, maxRaw);
+      return {
+        section, raw, maxRaw, qCount, attempted, time, scaled: null,
+        accuracy: (raw / maxRaw) * 100, completion: qCount ? (attempted / qCount) * 100 : null, band,
+      };
+    }
+
+    const raw = parseFloat(document.getElementById("f_raw").value);
+    const maxRaw = parseFloat(document.getElementById("f_maxRaw").value);
+    const qCount = parseFloat(qCountRaw) || maxRaw;
+    const attempted = attemptedRaw !== "" ? parseFloat(attemptedRaw) : qCount;
+    let scaled = parseFloat(document.getElementById("f_scaled").value);
+    if (isNaN(scaled)) scaled = suggestScaled(raw, maxRaw, section);
+    if (isNaN(raw) || isNaN(maxRaw) || maxRaw <= 0 || !scaled) {
+      alert("Please enter at least raw score, max raw mark, so a scaled score can be calculated (or enter scaled score directly).");
+      return null;
+    }
+    return {
+      section, raw, maxRaw, qCount, attempted, time, scaled,
+      accuracy: (raw / maxRaw) * 100, completion: qCount ? (attempted / qCount) * 100 : null, band: null,
+    };
+  }
+
   function handleLogSubmit(ev) {
     ev.preventDefault();
     const date = document.getElementById("f_date").value;
@@ -1488,11 +1543,32 @@
     const source = document.getElementById("f_source").value.trim();
     const notes = document.getElementById("f_notes").value.trim();
     const mistakes = Array.from(document.querySelectorAll("#mistakeChips input:checked")).map((c) => c.value);
-    const sittingId = uid();
-    const createdAt = Date.now();
 
     if (!date) { alert("Please pick a date."); return; }
 
+    // ---- EDITING AN EXISTING ENTRY: always single-section, update in place ----
+    if (editingEntryId) {
+      const existing = DB.entries.find((e) => e.id === editingEntryId);
+      if (!existing) { exitEditMode(); return; }
+      const data = buildSingleSectionEntryData();
+      if (!data) return;
+      Object.assign(existing, { date, testName, category, source, notes, mistakes }, data);
+      existing.updatedAt = Date.now();
+
+      if (source) DB.settings.lastSource = source;
+      DB.settings.lastCategory = category;
+      save();
+      const finishedEditId = editingEntryId;
+      exitEditMode();
+      showPage("entries");
+      document.getElementById("entriesMsg").textContent = "Entry updated ✓";
+      setTimeout(() => (document.getElementById("entriesMsg").textContent = ""), 3000);
+      return;
+    }
+
+    // ---- CREATING NEW ENTRY/ENTRIES ----
+    const sittingId = uid();
+    const createdAt = Date.now();
     const isMulti = document.getElementById("f_multiSection").checked;
     let created = 0;
 
@@ -1527,57 +1603,12 @@
         created++;
       });
     } else {
-      const section = document.getElementById("f_section").value;
-      const time = parseFloat(document.getElementById("f_time").value) || null;
-      const qCountRaw = document.getElementById("f_qCount").value;
-      const attemptedRaw = document.getElementById("f_attempted").value;
-
-      if (section === "SJT") {
-        const bandOnly = document.getElementById("f_sjtBandOnly").checked;
-        if (bandOnly) {
-          const band = parseInt(document.getElementById("f_bandManual").value, 10);
-          DB.entries.push({
-            id: uid(), sittingId: uid(), date, testName, category, source, section,
-            raw: null, maxRaw: null, qCount: null, attempted: null, time, scaled: null,
-            accuracy: null, completion: null, band, mistakes, notes, createdAt,
-          });
-          created++;
-        } else {
-          const raw = parseFloat(document.getElementById("f_raw").value);
-          const maxRaw = parseFloat(document.getElementById("f_maxRaw").value) || STANDARD_SECTION_INFO.SJT.maxRaw;
-          if (isNaN(raw) || !maxRaw) {
-            alert('Please enter a raw SJT score, or tick "I only have a Band".');
-            return;
-          }
-          const qCount = parseFloat(qCountRaw) || maxRaw;
-          const attempted = attemptedRaw !== "" ? parseFloat(attemptedRaw) : qCount;
-          const band = computeSjtBand(raw, maxRaw);
-          DB.entries.push({
-            id: uid(), sittingId: uid(), date, testName, category, source, section,
-            raw, maxRaw, qCount, attempted, time, scaled: null,
-            accuracy: (raw / maxRaw) * 100, completion: qCount ? (attempted / qCount) * 100 : null,
-            band, mistakes, notes, createdAt,
-          });
-          created++;
-        }
-      } else {
-        const raw = parseFloat(document.getElementById("f_raw").value);
-        const maxRaw = parseFloat(document.getElementById("f_maxRaw").value);
-        const qCount = parseFloat(qCountRaw) || maxRaw;
-        const attempted = attemptedRaw !== "" ? parseFloat(attemptedRaw) : qCount;
-        let scaled = parseFloat(document.getElementById("f_scaled").value);
-        if (isNaN(scaled)) scaled = suggestScaled(raw, maxRaw, section);
-        if (isNaN(raw) || isNaN(maxRaw) || maxRaw <= 0 || !scaled) {
-          alert("Please enter at least raw score, max raw mark, so a scaled score can be calculated (or enter scaled score directly).");
-          return;
-        }
-        DB.entries.push({
-          id: uid(), sittingId: uid(), date, testName, category, source, section,
-          raw, maxRaw, qCount, attempted, time, scaled,
-          accuracy: (raw / maxRaw) * 100, completion: qCount ? (attempted / qCount) * 100 : null,
-          band: null, mistakes, notes, createdAt,
-        });
+      const data = buildSingleSectionEntryData();
+      if (data) {
+        DB.entries.push(Object.assign({ id: uid(), sittingId: uid(), date, testName, category, source, mistakes, notes, createdAt }, data));
         created++;
+      } else {
+        return;
       }
     }
 
@@ -1590,6 +1621,76 @@
     setTimeout(() => (document.getElementById("saveMsg").textContent = ""), 3000);
     resetLogForm();
     refreshAllAfterDataChange();
+  }
+
+  // "Edit" on an entries-table row — loads that entry back into the (forced
+  // single-section) log form so it can be corrected, then updates it in place
+  // on save instead of creating a new entry.
+  function startEditEntry(id) {
+    const entry = DB.entries.find((e) => e.id === id);
+    if (!entry) return;
+
+    showPage("log");
+    editingEntryId = id;
+
+    // Editing is always single-section — force that mode and hide the toggle
+    // so it can't be flipped mid-edit.
+    multiManuallyToggled = true;
+    document.getElementById("f_multiSection").checked = false;
+    toggleMultiSection();
+    document.getElementById("multiSectionToggleRow").classList.add("hidden");
+
+    document.getElementById("f_date").value = entry.date;
+    document.getElementById("f_testName").value = entry.testName;
+    document.getElementById("f_category").value = entry.category;
+    document.getElementById("f_source").value = entry.source || "";
+    lastAutoTestName = entry.testName;
+    document.getElementById("categoryInfo").textContent = (MOCK_PROFILES[entry.category] || {}).note || "";
+
+    document.getElementById("f_section").value = entry.section;
+    timeManuallyEdited = true; // about to set time explicitly; don't let defaults clobber it
+    applySectionDefaults();
+
+    if (entry.section === "SJT" && entry.raw === null) {
+      document.getElementById("f_sjtBandOnly").checked = true;
+      toggleSjtBandOnly();
+      document.getElementById("f_bandManual").value = entry.band || 1;
+    } else {
+      document.getElementById("f_sjtBandOnly").checked = false;
+      toggleSjtBandOnly();
+      document.getElementById("f_raw").value = entry.raw;
+      document.getElementById("f_maxRaw").value = entry.maxRaw;
+      document.getElementById("f_qCount").value = entry.qCount || entry.maxRaw;
+      document.getElementById("f_attempted").value = entry.attempted !== null && entry.attempted !== undefined ? entry.attempted : "";
+      maxManuallyEdited = true;
+      qManuallyEdited = true;
+      if (entry.section !== "SJT") {
+        document.getElementById("f_scaled").value = entry.scaled;
+        scaledManuallyEdited = true;
+      }
+    }
+    document.getElementById("f_time").value = entry.time !== null && entry.time !== undefined ? entry.time : "";
+    updateAccuracyPreview();
+    updateBandPreview();
+
+    document.querySelectorAll("#mistakeChips input").forEach((c) => { c.checked = (entry.mistakes || []).includes(c.value); });
+    document.getElementById("f_notes").value = entry.notes || "";
+    if ((entry.mistakes && entry.mistakes.length) || entry.notes) document.getElementById("advancedFields").open = true;
+
+    document.getElementById("editingBanner").textContent =
+      "Editing the " + fmtDate(entry.date) + " " + SECTION_NAMES[entry.section] + " entry — saving will update it instead of creating a new one.";
+    document.querySelector('#logForm button[type="submit"]').textContent = "Update attempt";
+    document.getElementById("cancelEditBtn").classList.remove("hidden");
+    document.getElementById("f_testName").focus();
+  }
+
+  function exitEditMode() {
+    editingEntryId = null;
+    document.getElementById("multiSectionToggleRow").classList.remove("hidden");
+    document.getElementById("editingBanner").textContent = "";
+    document.querySelector('#logForm button[type="submit"]').textContent = "Save attempt";
+    document.getElementById("cancelEditBtn").classList.add("hidden");
+    resetLogForm();
   }
 
   // "Repeat last setup" — copies the most recent entry's category/source/section so
@@ -1680,10 +1781,14 @@
     initSectionPages();
 
     document.querySelectorAll(".nav-link").forEach((btn) => {
-      btn.addEventListener("click", () => showPage(btn.dataset.page));
+      btn.addEventListener("click", () => {
+        if (editingEntryId && btn.dataset.page !== "log") exitEditMode();
+        showPage(btn.dataset.page);
+      });
     });
-    document.getElementById("quickAddBtn").addEventListener("click", () => showPage("log"));
-    document.getElementById("repeatLastBtn").addEventListener("click", () => { showPage("log"); repeatLastSetup(); });
+    document.getElementById("quickAddBtn").addEventListener("click", () => { exitEditMode(); showPage("log"); });
+    document.getElementById("repeatLastBtn").addEventListener("click", () => { exitEditMode(); showPage("log"); repeatLastSetup(); });
+    document.getElementById("cancelEditBtn").addEventListener("click", exitEditMode);
 
     renderBandRefTable(document.getElementById("bandRefTable"));
 

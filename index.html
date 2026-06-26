@@ -19,8 +19,7 @@
     <div class="brand">
       <span class="brand-mark">U</span>
       <div class="brand-text">
-        <strong>UCAT Console</strong>
-        <small>score command center</small>
+        <strong>UCAT Tracker</strong>
       </div>
     </div>
 
@@ -154,8 +153,9 @@
           </div>
 
           <p class="callout" id="categoryInfo"></p>
+          <p class="callout" id="editingBanner"></p>
 
-          <div class="toggle-row">
+          <div class="toggle-row" id="multiSectionToggleRow">
             <label class="check">
               <input type="checkbox" id="f_multiSection">
               Log all four sections from this sitting at once
@@ -281,6 +281,7 @@
 
           <div class="form-actions">
             <button type="submit" class="btn-primary">Save attempt</button>
+            <button type="button" id="cancelEditBtn" class="btn-ghost hidden">Cancel edit</button>
             <span id="saveMsg" class="save-msg"></span>
           </div>
         </form>
@@ -313,6 +314,7 @@
           <input type="date" id="filt_to">
         </label>
         <button class="btn-ghost" id="filt_clear">Clear filters</button>
+        <span id="entriesMsg" class="save-msg"></span>
       </div>
 
       <div class="card">
