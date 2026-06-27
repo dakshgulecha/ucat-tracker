@@ -981,9 +981,21 @@
       type: "bar",
       data: {
         labels: recent.map((e) => fmtDate(e.date)),
-        datasets: [{ label: "Band (1=best)", data: recent.map((e) => e.band || null), backgroundColor: SECTION_COLORS.SJT }],
+        datasets: [{
+          label: "Band (1=best)",
+          data: recent.map((e) => e.band || null),
+          backgroundColor: SECTION_COLORS.SJT,
+          base: 4, // anchor every bar to the worst band (4) at the bottom, so bars rise upward — a Band 1 result draws a full-height bar instead of collapsing to nothing
+          minBarLength: 6, // guarantees even a Band 4 result (height 0 from its own base) still shows a visible sliver
+        }],
       },
-      options: { scales: { y: { min: 1, max: 4, reverse: true, ticks: { stepSize: 1 } } }, plugins: { legend: { display: false } } },
+      options: {
+        scales: { y: { min: 1, max: 4, reverse: true, ticks: { stepSize: 1 } } },
+        plugins: {
+          legend: { display: false },
+          tooltip: { callbacks: { label: (ctx) => "Band " + ctx.raw } },
+        },
+      },
     });
   }
 
