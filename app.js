@@ -50,6 +50,15 @@
   const FULLMOCK_LIKE = ["Full Mock", "Medify Mock", "UCAT Official Mock"];
   const TIMED_LIKE = ["Full Mock", "Medify Mock", "UCAT Official Mock", "Timed Practice"];
 
+  const THEMES = [
+    { key: "pastel-pink", name: "Pastel Pink" },
+    { key: "pastel-blue", name: "Pastel Blue" },
+    { key: "pastel-green", name: "Pastel Green" },
+    { key: "light", name: "Light" },
+    { key: "charcoal", name: "Charcoal Black" },
+  ];
+  const DEFAULT_THEME = "pastel-pink";
+
   // Standard UCAT section structure — used to pre-fill defaults (editable for non-standard practice sets)
   const STANDARD_SECTION_INFO = {
     QR: { maxRaw: 36, time: 25 },
@@ -128,7 +137,7 @@
     return {
       entries: [],
       targets: { QR: 700, DM: 700, VR: 700, SJT: 2 }, // SJT target is a Band (1 best – 4 lowest)
-      settings: { lastSource: "", lastCategory: "Full Mock" },
+      settings: { lastSource: "", lastCategory: "Full Mock", theme: DEFAULT_THEME },
     };
   }
 
@@ -141,6 +150,7 @@
     if (parsed.targets.SJT === undefined || parsed.targets.SJT > 4) parsed.targets.SJT = 2; // migrate old 300-900 SJT target
     if (!parsed.settings) parsed.settings = defaultData().settings;
     if (parsed.settings.lastCategory === undefined) parsed.settings.lastCategory = "Full Mock";
+    if (!THEMES.some((t) => t.key === parsed.settings.theme)) parsed.settings.theme = DEFAULT_THEME;
     // Fix up any legacy SJT entries: no scaled score, band derived from raw if missing.
     parsed.entries.forEach((e) => {
       if (e.section === "SJT") {
@@ -174,6 +184,10 @@
   }
 
   let DB = load();
+
+  // Applied immediately (not waiting for DOMContentLoaded) so the page never
+  // flashes the default theme before switching to the saved one.
+  document.documentElement.setAttribute("data-theme", DB.settings.theme || DEFAULT_THEME);
 
   function uid() {
     return "id_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 8);
@@ -384,6 +398,43 @@
     Chart.defaults.borderColor = "#D5C5C8";
   }
 
+  /* ------------------------------ THEMES -------------------------------- */
+  // Chart.js doesn't read CSS variables on its own, so its grid/axis colors
+  // are re-derived from the live CSS each time the theme changes, then every
+  // chart on the current page is re-rendered (makeChart destroys+recreates
+  // canvases by id, so they immediately pick up the refreshed defaults).
+  function syncChartDefaultsToTheme() {
+    if (CHART_LIB_MISSING) return;
+    const cs = getComputedStyle(document.documentElement);
+    const ink = cs.getPropertyValue("--ink-soft").trim();
+    const line = cs.getPropertyValue("--line").trim();
+    if (ink) Chart.defaults.color = ink;
+    if (line) Chart.defaults.borderColor = line;
+  }
+
+  function markActiveThemeSwatches() {
+    document.querySelectorAll(".theme-swatch").forEach((btn) => {
+      btn.classList.toggle("active", btn.dataset.theme === DB.settings.theme);
+    });
+    const readout = document.getElementById("themeNameReadout");
+    if (readout) {
+      const t = THEMES.find((th) => th.key === DB.settings.theme);
+      readout.textContent = "Current: " + (t ? t.name : DB.settings.theme);
+    }
+  }
+
+  function setTheme(key) {
+    if (!THEMES.some((t) => t.key === key)) return;
+    DB.settings.theme = key;
+    save(); // persists the choice to localStorage, and it's included in any exported backup JSON
+    document.documentElement.setAttribute("data-theme", key);
+    markActiveThemeSwatches();
+    syncChartDefaultsToTheme();
+    renderPage(currentPage);
+  }
+
+  let currentPage = "dashboard";
+
   function emptyState(canvas) {
     if (!canvas) return;
     if (charts[canvas.id]) { charts[canvas.id].destroy(); delete charts[canvas.id]; }
@@ -442,6 +493,7 @@
   }
 
   function showPage(key) {
+    currentPage = key;
     Object.values(pages).forEach((p) => p.classList.remove("active"));
     if (pages[key]) pages[key].classList.add("active");
     document.querySelectorAll(".nav-link").forEach((b) => {
@@ -1797,6 +1849,9 @@
      GLOBAL REFRESH
      ========================================================================= */
   function refreshAllAfterDataChange() {
+    document.documentElement.setAttribute("data-theme", DB.settings.theme || DEFAULT_THEME);
+    markActiveThemeSwatches();
+    syncChartDefaultsToTheme();
     const activeBtn = document.querySelector(".nav-link.active");
     const key = activeBtn ? activeBtn.dataset.page : "dashboard";
     renderPage(key || "dashboard");
@@ -1808,6 +1863,15 @@
   function init() {
     initStaticPages();
     initSectionPages();
+
+    // Theme: CSS attribute was already set as early as possible (see DB load
+    // above) to avoid a flash; sync the chart color defaults to match before
+    // anything is drawn, and wire up every swatch (sidebar + Data page).
+    syncChartDefaultsToTheme();
+    document.querySelectorAll(".theme-swatch").forEach((btn) => {
+      btn.addEventListener("click", () => setTheme(btn.dataset.theme));
+    });
+    markActiveThemeSwatches();
 
     document.querySelectorAll(".nav-link").forEach((btn) => {
       btn.addEventListener("click", () => {

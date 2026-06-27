@@ -40,6 +40,14 @@
   --neutral-bg: #EAE3E2;
   --gold:     var(--rose-deep);
 
+  /* Sidebar / scorecard chrome — deliberately decoupled from --taupe/--taupe-deep
+     so those two tokens stay free to flip per theme (light text needs a dark
+     ink on light themes, a light ink on dark themes) without ever breaking the
+     hardcoded light-colored labels inside the sidebar or scorecard, which are
+     always rendered against this dark chrome regardless of theme. */
+  --chrome-deep:  #3F3136;
+  --chrome:       #604D53;
+
   --font-display: "Fraunces", Georgia, serif;
   --font-body: "Inter", -apple-system, BlinkMacSystemFont, sans-serif;
   --font-mono: "IBM Plex Mono", "SFMono-Regular", monospace;
@@ -48,6 +56,135 @@
   --radius-md: 10px;
   --radius-lg: 16px;
   --shadow-card: 0 1px 2px rgba(96,77,83,0.08), 0 8px 22px rgba(96,77,83,0.07);
+}
+
+/* ===================== THEMES ===================== */
+/* Pastel Pink is the default palette above (:root). The themes below override
+   the same token set; everything else in this file consumes the tokens only,
+   so no other rule needs to change when the theme switches. */
+
+[data-theme="charcoal"]{
+  --chrome-deep:  #0D0B0C;
+  --chrome:       #1F1A1C;
+  --blush:        #2E2024;
+  --blush-pale:   #161315;
+  --rose:         #E8909F;
+  --rose-deep:    #D9748A;
+  --rose-tint:    #34242A;
+  --slate:        #362F33;
+  --slate-strong: #463E42;
+  --steel:        #6E7577;
+  --steel-deep:   #9DA6A8;
+  --taupe:        #8C5C68;
+  --taupe-deep:   #F1E8EA;
+  --terracotta:   #CC8569;
+  --terracotta-tint: #34241D;
+
+  --paper-raised: #221D20;
+  --ink-soft:     #B7A8AC;
+  --dm-soft:      #2A1F22;
+  --vr-soft:      #232627;
+
+  --good:     #7FC08C;
+  --good-bg:  #1E2C22;
+  --bad:      #E2837F;
+  --bad-bg:   #34201F;
+  --neutral-bg: #25282A;
+
+  --shadow-card: 0 1px 2px rgba(0,0,0,0.6), 0 8px 22px rgba(0,0,0,0.5);
+}
+
+[data-theme="light"]{
+  --chrome-deep:  #1E2330;
+  --chrome:       #2B3142;
+  --blush:        #E7E9EE;
+  --blush-pale:   #FAFBFC;
+  --rose:         #5C6AC4;
+  --rose-deep:    #4451B0;
+  --rose-tint:    #E9EBFA;
+  --slate:        #E1E4E9;
+  --slate-strong: #C7CCD3;
+  --steel:        #9AA1AC;
+  --steel-deep:   #5B6472;
+  --taupe:        #6B5645;
+  --taupe-deep:   #1E2330;
+  --terracotta:   #B5663D;
+  --terracotta-tint: #F3E2D6;
+
+  --paper-raised: #FFFFFF;
+  --ink-soft:     #5B6472;
+  --dm-soft:      #EFE6DE;
+  --vr-soft:      #E7E9EC;
+
+  --good:     #3C8C53;
+  --good-bg:  #E3F3E6;
+  --bad:      #C24B43;
+  --bad-bg:   #FBE4E1;
+  --neutral-bg: #EBEDEF;
+
+  --shadow-card: 0 1px 2px rgba(30,35,48,0.06), 0 8px 22px rgba(30,35,48,0.07);
+}
+
+[data-theme="pastel-blue"]{
+  --chrome-deep:  #1F2E3D;
+  --chrome:       #2E4258;
+  --blush:        #D9E8F5;
+  --blush-pale:   #F1F7FC;
+  --rose:         #5B92C7;
+  --rose-deep:    #3E709E;
+  --rose-tint:    #DCEAF6;
+  --slate:        #D7E2EC;
+  --slate-strong: #B9CADC;
+  --steel:        #94A8B8;
+  --steel-deep:   #5E7689;
+  --taupe:        #6E7F95;
+  --taupe-deep:   #28384A;
+  --terracotta:   #C77A52;
+  --terracotta-tint: #F1DCCB;
+
+  --paper-raised: #FFFFFF;
+  --ink-soft:     #5E7689;
+  --dm-soft:      #E4E9F0;
+  --vr-soft:      #E6EDEF;
+
+  --good:     #3F8F6B;
+  --good-bg:  #DFF1E7;
+  --bad:      #C2564E;
+  --bad-bg:   #FAE1DE;
+  --neutral-bg: #E6ECF1;
+
+  --shadow-card: 0 1px 2px rgba(40,56,74,0.08), 0 8px 22px rgba(40,56,74,0.07);
+}
+
+[data-theme="pastel-green"]{
+  --chrome-deep:  #1E2E22;
+  --chrome:       #2C4232;
+  --blush:        #DCEFDD;
+  --blush-pale:   #F3FAF3;
+  --rose:         #5E9B6C;
+  --rose-deep:    #447951;
+  --rose-tint:    #DDEFE0;
+  --slate:        #D7E7D9;
+  --slate-strong: #B7D2BC;
+  --steel:        #94B49B;
+  --steel-deep:   #5C7D63;
+  --taupe:        #8C8350;
+  --taupe-deep:   #243426;
+  --terracotta:   #BD6E50;
+  --terracotta-tint: #EFDACB;
+
+  --paper-raised: #FFFFFF;
+  --ink-soft:     #5C7D63;
+  --dm-soft:      #EFEBD9;
+  --vr-soft:      #E3ECE4;
+
+  --good:     #3C8C53;
+  --good-bg:  #DFF1E2;
+  --bad:      #BD5046;
+  --bad-bg:   #F9E0DC;
+  --neutral-bg: #E6EDE6;
+
+  --shadow-card: 0 1px 2px rgba(36,52,38,0.08), 0 8px 22px rgba(36,52,38,0.07);
 }
 
 *{box-sizing:border-box;}
@@ -64,6 +201,10 @@ body{
   background-size: auto, auto, 28px 28px, 28px 28px;
   background-attachment: fixed;
   background-position: 0 0, 0 0, -1px -1px, -1px -1px;
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+.app, .card, .kpi, .sidebar, .scorecard, .data-table, .nav-link, input, select, textarea, .tag, .btn-primary, .btn-ghost, .btn-danger{
+  transition: background-color 0.2s ease, color 0.2s ease, border-color 0.2s ease;
 }
 *:focus-visible{ outline: 2px solid var(--rose-deep); outline-offset: 2px; }
 
@@ -78,7 +219,7 @@ input, select, textarea{ font-family: var(--font-body); }
 .sidebar{
   width: 248px;
   flex-shrink:0;
-  background: linear-gradient(165deg, var(--taupe-deep), var(--taupe) 130%);
+  background: linear-gradient(165deg, var(--chrome-deep), var(--chrome) 130%);
   color: #F3E9EA;
   display:flex;
   flex-direction:column;
@@ -134,7 +275,7 @@ input, select, textarea{ font-family: var(--font-body); }
 
 /* ===================== SCORECARD (signature element) ===================== */
 .scorecard{
-  display:flex; gap:0; background: linear-gradient(160deg, var(--taupe-deep), var(--taupe) 140%); border-radius: var(--radius-lg);
+  display:flex; gap:0; background: linear-gradient(160deg, var(--chrome-deep), var(--chrome) 140%); border-radius: var(--radius-lg);
   padding: 22px 10px; margin-bottom: 22px; box-shadow: var(--shadow-card);
   overflow-x:auto;
 }
@@ -311,3 +452,36 @@ input:focus, select:focus, textarea:focus{ border-color: var(--rose-deep); }
 
 ::-webkit-scrollbar{ height:8px; width:8px; }
 ::-webkit-scrollbar-thumb{ background: var(--line-strong); border-radius:8px; }
+
+/* ===================== THEME PICKER ===================== */
+.theme-picker{ display:flex; flex-direction:column; gap:7px; padding:2px 6px 10px; }
+.theme-picker-label{ font-family: var(--font-mono); font-size:10px; text-transform:uppercase; letter-spacing:0.08em; color:#B89BA0; }
+.theme-swatches{ display:flex; gap:9px; flex-wrap:wrap; }
+.theme-swatch{
+  width:22px; height:22px; border-radius:50%; padding:0; cursor:pointer;
+  border:2px solid rgba(255,255,255,0.22); box-shadow:0 0 0 0 transparent;
+  transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+  position:relative;
+}
+.theme-swatch:hover{ transform: scale(1.14); }
+.theme-swatch.active{ border-color:#fff; box-shadow: 0 0 0 2px rgba(255,255,255,0.32); }
+.theme-swatch.active::after{
+  content:"✓"; position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+  font-size:11px; font-weight:700; color:#fff; text-shadow:0 1px 2px rgba(0,0,0,0.5);
+}
+.theme-swatch[data-theme="pastel-pink"]{ background: linear-gradient(135deg, #FFDBDA, #DB7F8E); }
+.theme-swatch[data-theme="pastel-blue"]{ background: linear-gradient(135deg, #D9E8F5, #5B92C7); }
+.theme-swatch[data-theme="pastel-green"]{ background: linear-gradient(135deg, #DCEFDD, #5E9B6C); }
+.theme-swatch[data-theme="light"]{ background: linear-gradient(135deg, #FAFBFC, #5C6AC4); }
+.theme-swatch[data-theme="charcoal"]{ background: linear-gradient(135deg, #1F1A1C, #E8909F); }
+
+/* Larger variant used inside the Data & Backup page's Appearance card, where
+   the surrounding background is theme-dependent rather than the fixed-dark
+   sidebar chrome, so labels use the normal ink tokens instead of hardcoded
+   light text. */
+.theme-picker.theme-picker-page{ padding:6px 0 4px; }
+.theme-picker.theme-picker-page .theme-picker-label{ color: var(--ink-soft); font-size:11px; }
+.theme-picker.theme-picker-page .theme-swatch{ width:30px; height:30px; border:2px solid var(--line-strong); }
+.theme-picker.theme-picker-page .theme-swatch.active{ border-color: var(--rose-deep); box-shadow: 0 0 0 2px var(--rose-tint); }
+.theme-picker.theme-picker-page .theme-swatch.active::after{ text-shadow:0 1px 2px rgba(0,0,0,0.35); }
+.theme-name-readout{ font-family: var(--font-mono); font-size:11.5px; color: var(--ink-soft); margin-top:2px; }

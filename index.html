@@ -42,7 +42,7 @@
 
       <div class="nav-group-label">Planning</div>
       <button class="nav-link" data-page="targets">Targets &amp; Prediction</button>
-      <button class="nav-link" data-page="data">Data &amp; Backup</button>
+      <button class="nav-link" data-page="data">Appearance &amp; Data</button>
     </nav>
 
     <div class="sidebar-foot">
@@ -509,14 +509,28 @@
       </div>
     </section>
 
-    <!-- ===================== DATA & BACKUP ===================== -->
+    <!-- ===================== APPEARANCE & DATA ===================== -->
     <section id="page-data" class="page">
       <header class="page-head">
         <div>
           <p class="eyebrow">Your data, your machine</p>
-          <h1>Data &amp; Backup</h1>
+          <h1>Appearance &amp; Data</h1>
         </div>
       </header>
+      <div class="card">
+        <div class="card-head"><h3>Appearance</h3><span class="card-sub">your choice is saved in this browser, and included in exported backups</span></div>
+        <div class="theme-picker theme-picker-page" id="themePickerPage">
+          <span class="theme-picker-label">Theme</span>
+          <div class="theme-swatches">
+            <button type="button" class="theme-swatch" data-theme="pastel-pink" title="Pastel Pink" aria-label="Pastel Pink theme"></button>
+            <button type="button" class="theme-swatch" data-theme="pastel-blue" title="Pastel Blue" aria-label="Pastel Blue theme"></button>
+            <button type="button" class="theme-swatch" data-theme="pastel-green" title="Pastel Green" aria-label="Pastel Green theme"></button>
+            <button type="button" class="theme-swatch" data-theme="light" title="Light" aria-label="Light theme"></button>
+            <button type="button" class="theme-swatch" data-theme="charcoal" title="Charcoal Black" aria-label="Charcoal Black theme"></button>
+          </div>
+        </div>
+        <p class="theme-name-readout" id="themeNameReadout"></p>
+      </div>
       <div class="card">
         <p>Everything is stored locally in this browser's storage — nothing leaves your device unless you log in. Export a backup regularly, especially before clearing browser data or switching devices/browsers.</p>
         <p id="syncStatus" class="callout"></p>
