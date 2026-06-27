@@ -12,6 +12,11 @@
 (function () {
   "use strict";
 
+  const CHART_LIB_MISSING = typeof Chart === "undefined";
+  if (CHART_LIB_MISSING) {
+    console.error("Chart.js did not load — chart.umd.js may be missing or blocked. All graphs will show an error instead of your data.");
+  }
+
   /* ----------------------------- CONSTANTS ----------------------------- */
   const STORAGE_KEY = "ucatTrackerData_v2";
   const SECTIONS = ["QR", "DM", "VR", "SJT"];
@@ -332,24 +337,30 @@
     return mean(arr);
   }
 
-  /* --------------------- DATE-ALIGNED CATEGORY AXIS HELPERS ---------------------
+  /* --------------------- PER-ATTEMPT TIMELINE AXIS HELPERS ---------------------
      Chart.js's "time" scale requires a date adapter (date-fns/luxon/moment) to
      work — this project deliberately doesn't load one (no extra CDN dependency
-     for a local-only tool). Multi-section line charts instead share one sorted,
-     deduplicated list of date strings as plain category labels, and each
-     section's series is null-filled to align with it index-for-index. Chart.js
-     skips nulls and (with spanGaps) draws straight through them, so each line
-     still reads as a continuous trend even though sections were logged on
-     different dates.                                                          */
-  function buildDateLabels(entriesList) {
-    const set = new Set();
-    entriesList.forEach((e) => set.add(e.date));
-    return [...set].sort();
+     for a local-only tool). Multi-section line charts instead share one
+     chronologically-sorted timeline built from the underlying ENTRIES (not
+     dates) being charted, and each section's series is aligned to it by entry
+     id. This matters because more than one attempt can be logged on the same
+     calendar date (e.g. backfilling several mocks in one sitting) — aligning
+     by date string alone would let a later same-day entry silently overwrite
+     an earlier one's slot. Aligning by entry id instead gives every logged
+     attempt its own point, even when several share a date; the date simply
+     repeats as the tick label for adjacent points. Chart.js skips nulls and
+     (with spanGaps) draws straight through them, so each line still reads as
+     a continuous trend even when sections were logged at different times.    */
+  function buildAttemptTimeline(entriesList) {
+    return [...entriesList].sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : a.createdAt - b.createdAt));
   }
-  function seriesAlignedToLabels(entries, labels, valueFn) {
-    const byDate = {};
-    entries.forEach((e) => { byDate[e.date] = valueFn(e); }); // entries are date-sorted, so same-date dupes keep the latest
-    return labels.map((d) => (Object.prototype.hasOwnProperty.call(byDate, d) ? byDate[d] : null));
+  function seriesAlignedToTimeline(entries, timeline, valueFn) {
+    const byId = {};
+    entries.forEach((e) => { byId[e.id] = valueFn(e); });
+    return timeline.map((slot) => (Object.prototype.hasOwnProperty.call(byId, slot.id) ? byId[slot.id] : null));
+  }
+  function timelineLabels(timeline) {
+    return timeline.map((e) => e.date);
   }
   function dateAxisOptions() {
     return { ticks: { callback: function (value) { return fmtDate(this.getLabelForValue(value)); } } };
@@ -359,6 +370,7 @@
   const charts = {};
   function makeChart(canvas, config) {
     if (!canvas) return null;
+    if (CHART_LIB_MISSING) { chartLibErrorState(canvas); return null; }
     const id = canvas.id;
     if (charts[id]) { charts[id].destroy(); }
     charts[id] = new Chart(canvas.getContext("2d"), config);
@@ -366,9 +378,11 @@
   }
 
   const baseFont = { family: "Inter, sans-serif", size: 11 };
-  Chart.defaults.font = baseFont;
-  Chart.defaults.color = "#7C6A6F";
-  Chart.defaults.borderColor = "#D5C5C8";
+  if (!CHART_LIB_MISSING) {
+    Chart.defaults.font = baseFont;
+    Chart.defaults.color = "#7C6A6F";
+    Chart.defaults.borderColor = "#D5C5C8";
+  }
 
   function emptyState(canvas) {
     if (!canvas) return;
@@ -380,6 +394,18 @@
     ctx.fillStyle = "#A6898E";
     ctx.textAlign = "center";
     ctx.fillText("No data logged yet", canvas.width / 2, canvas.height / 2);
+    ctx.restore();
+  }
+
+  function chartLibErrorState(canvas) {
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.save();
+    ctx.font = "13px Inter, sans-serif";
+    ctx.fillStyle = "#AD4A48";
+    ctx.textAlign = "center";
+    ctx.fillText("Charting library failed to load — check chart.umd.js is present", canvas.width / 2, canvas.height / 2);
     ctx.restore();
   }
 
@@ -612,10 +638,11 @@
     const canvas = document.getElementById("chartOverallTrend");
     const allCognitive = COGNITIVE_SECTIONS.flatMap((sec) => bySection(sec));
     if (!allCognitive.length) { emptyState(canvas); return; }
-    const labels = buildDateLabels(allCognitive);
+    const timeline = buildAttemptTimeline(allCognitive);
+    const labels = timelineLabels(timeline);
     const datasets = COGNITIVE_SECTIONS.map((sec) => ({
       label: sec,
-      data: seriesAlignedToLabels(bySection(sec), labels, (e) => e.scaled),
+      data: seriesAlignedToTimeline(bySection(sec), timeline, (e) => e.scaled),
       borderColor: SECTION_COLORS[sec],
       backgroundColor: SECTION_COLORS[sec],
       tension: 0.3,
@@ -1009,14 +1036,15 @@
     }
     const cognitive = entries.filter((e) => e.section !== "SJT");
     if (cognitive.length) {
-      const labels = buildDateLabels(cognitive);
+      const timeline = buildAttemptTimeline(cognitive);
+      const labels = timelineLabels(timeline);
       makeChart(trendCanvas, {
         type: "line",
         data: {
           labels,
           datasets: COGNITIVE_SECTIONS.map((sec) => ({
             label: sec,
-            data: seriesAlignedToLabels(entries.filter((e) => e.section === sec), labels, (e) => e.scaled),
+            data: seriesAlignedToTimeline(entries.filter((e) => e.section === sec), timeline, (e) => e.scaled),
             borderColor: SECTION_COLORS[sec],
             backgroundColor: SECTION_COLORS[sec],
             tension: 0.25,
@@ -1066,7 +1094,8 @@
       return;
     }
 
-    const labels = buildDateLabels(practiceEntries);
+    const timeline = buildAttemptTimeline(practiceEntries);
+    const labels = timelineLabels(timeline);
 
     makeChart(accCanvas, {
       type: "line",
@@ -1074,7 +1103,7 @@
         labels,
         datasets: SECTIONS.map((sec) => ({
           label: sec,
-          data: seriesAlignedToLabels(practiceEntries.filter((e) => e.section === sec), labels, (e) => e.accuracy),
+          data: seriesAlignedToTimeline(practiceEntries.filter((e) => e.section === sec), timeline, (e) => e.accuracy),
           borderColor: SECTION_COLORS[sec], backgroundColor: SECTION_COLORS[sec], tension: 0.25, spanGaps: true,
         })),
       },
@@ -1087,7 +1116,7 @@
         labels,
         datasets: SECTIONS.map((sec) => ({
           label: sec,
-          data: seriesAlignedToLabels(practiceEntries.filter((e) => e.section === sec && e.completion !== null), labels, (e) => e.completion),
+          data: seriesAlignedToTimeline(practiceEntries.filter((e) => e.section === sec && e.completion !== null), timeline, (e) => e.completion),
           borderColor: SECTION_COLORS[sec], backgroundColor: SECTION_COLORS[sec], tension: 0.25, spanGaps: true,
         })),
       },
@@ -1100,7 +1129,7 @@
         labels,
         datasets: SECTIONS.map((sec) => ({
           label: sec,
-          data: seriesAlignedToLabels(practiceEntries.filter((e) => e.section === sec && e.time && e.qCount), labels, (e) => Math.round((e.time * 60) / e.qCount)),
+          data: seriesAlignedToTimeline(practiceEntries.filter((e) => e.section === sec && e.time && e.qCount), timeline, (e) => Math.round((e.time * 60) / e.qCount)),
           borderColor: SECTION_COLORS[sec], backgroundColor: SECTION_COLORS[sec], tension: 0.25, spanGaps: true,
         })),
       },
